@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {"role": "user", "content": "Kafka or RabbitMQ for eventing"},
+    {"role": "assistant", "content": "Kafka for high throughput"},
+    {"role": "assistant", "content": "RabbitMQ for routing flexibility"},
+    {"role": "user", "content": "Kafka matches our volume needs"}
+  ]
+}

@@ -1,0 +1,43 @@
+# Secrets and local env
+.env
+.env.*
+!.env.example
+
+# Local app / editor state
+.DS_Store
+.claude/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.db
+
+# Virtual environments
+venv/
+.venv/
+venv311/
+
+# Local data stores
+.pgdata/
+chroma_db/
+.mem0/
+core/.mem0/
+mem0/
+
+# Generated exports / local inspection artifacts
+graph_full.json
+cosmograph_points.json
+cosmograph_links.json
+cosmograph_points.csv
+cosmograph_links.csv
+
+# Coverage / logs
+.coverage
+htmlcov/
+*.log
+
+# OS / notebook cruft
+.ipynb_checkpoints/
+
+# Unused nested repo
+contextplus/

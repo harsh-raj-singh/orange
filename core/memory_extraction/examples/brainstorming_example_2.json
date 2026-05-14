@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {"role": "user", "content": "Monolith vs microservices?"},
+    {"role": "assistant", "content": "Monolith has simpler ops"},
+    {"role": "assistant", "content": "Microservices improve team autonomy"},
+    {"role": "user", "content": "We accept complexity and choose microservices"}
+  ]
+}

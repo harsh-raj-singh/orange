@@ -1,0 +1,9 @@
+{
+  "messages": [
+    {"role": "user", "content": "Redis connection timeout in prod"},
+    {"role": "assistant", "content": "Check VPC security group"},
+    {"role": "user", "content": "Port 6379 blocked"},
+    {"role": "assistant", "content": "Open 6379 between app and cache SG"},
+    {"role": "user", "content": "Resolved"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {"role": "user", "content": "Review this API code"},
+    {"role": "assistant", "content": "Issue: missing input validation in /users endpoint"},
+    {"role": "assistant", "content": "Suggestion: add pydantic validation"},
+    {"role": "user", "content": "Done"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {"role": "user", "content": "Review my React product list"},
+    {"role": "assistant", "content": "Issue: unoptimized re-renders in ProductList.jsx"},
+    {"role": "assistant", "content": "Suggestion: use React.memo and useCallback"},
+    {"role": "user", "content": "Applied, performance improved"}
+  ]
+}

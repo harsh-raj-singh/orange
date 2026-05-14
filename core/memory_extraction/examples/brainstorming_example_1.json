@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {"role": "user", "content": "Choose DB for analytics"},
+    {"role": "assistant", "content": "Option: PostgreSQL with Timescale"},
+    {"role": "assistant", "content": "Option: ClickHouse"},
+    {"role": "user", "content": "Let's choose ClickHouse for speed"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {"role": "user", "content": "Can you review SQL query performance"},
+    {"role": "assistant", "content": "Issue: full table scan on orders"},
+    {"role": "assistant", "content": "Suggestion: add index on customer_id and created_at"},
+    {"role": "user", "content": "Query time dropped by 60%"}
+  ]
+}

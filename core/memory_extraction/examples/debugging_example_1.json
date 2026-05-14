@@ -1,0 +1,9 @@
+{
+  "messages": [
+    {"role": "user", "content": "Lambda deploy failed"},
+    {"role": "assistant", "content": "What error do you see?"},
+    {"role": "user", "content": "AccessDeniedException for lambda:CreateFunction"},
+    {"role": "assistant", "content": "Add lambda:CreateFunction permission in IAM role"},
+    {"role": "user", "content": "It worked"}
+  ]
+}

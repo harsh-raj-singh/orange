@@ -1,0 +1,9 @@
+{
+  "messages": [
+    {"role": "user", "content": "Docker build fails with apt error"},
+    {"role": "assistant", "content": "Clear apt cache and retry"},
+    {"role": "user", "content": "Still failed"},
+    {"role": "assistant", "content": "Pin the image digest and update mirror"},
+    {"role": "user", "content": "Build succeeded"}
+  ]
+}
