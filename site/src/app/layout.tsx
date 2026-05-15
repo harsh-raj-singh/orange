@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import SiteMotion from "@/components/site-motion";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,7 +29,10 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
-      <body className="min-h-full antialiased">{children}</body>
+      <body className="min-h-full antialiased">
+        <SiteMotion />
+        {children}
+      </body>
     </html>
   );
 }

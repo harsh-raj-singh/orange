@@ -26,3 +26,290 @@ html {
   background: #ffcf7a;
   color: #182019;
 }
+
+.cursor-glow {
+  background: radial-gradient(360px circle at var(--cursor-x, 50vw) var(--cursor-y, 50vh), rgba(255, 141, 64, 0.1), transparent 48%);
+}
+
+.site-nav {
+  border-bottom: 1px solid transparent;
+  background: rgba(13, 18, 16, 0.18);
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease,
+    backdrop-filter 220ms ease,
+    box-shadow 220ms ease;
+}
+
+html[data-scrolled] .site-nav {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(13, 18, 16, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.18);
+}
+
+.hero-word-mask {
+  display: inline-block;
+  margin-right: 0.18em;
+  overflow: hidden;
+  perspective: 700px;
+  vertical-align: top;
+}
+
+.hero-word-mask > span,
+.line-mask > span {
+  display: inline-block;
+}
+
+.line-mask {
+  display: block;
+  overflow: hidden;
+}
+
+.shimmer-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer-button::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(110deg, transparent 0%, rgba(255, 255, 255, 0.28) 45%, transparent 70%);
+  transform: translateX(-130%);
+  transition: transform 640ms ease;
+}
+
+.shimmer-button:hover::after {
+  transform: translateX(130%);
+}
+
+.story-panel {
+  min-height: 560px;
+  width: min(78vw, 620px);
+  flex: 0 0 auto;
+  border: 1px solid rgba(36, 53, 45, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: clamp(1.25rem, 3vw, 2.5rem);
+  box-shadow: 0 30px 90px rgba(36, 53, 45, 0.12);
+}
+
+.type-line {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.mini-graph {
+  position: relative;
+  min-height: 280px;
+  border-radius: 16px;
+  border: 1px solid rgba(36, 53, 45, 0.1);
+  background:
+    radial-gradient(circle at 24% 26%, rgba(197, 85, 28, 0.14), transparent 26%),
+    radial-gradient(circle at 70% 58%, rgba(47, 111, 94, 0.14), transparent 28%),
+    #f7f3e8;
+}
+
+.mini-graph::before,
+.mini-graph::after {
+  position: absolute;
+  height: 1px;
+  content: "";
+  background: rgba(36, 53, 45, 0.22);
+  transform-origin: left center;
+}
+
+.mini-graph::before {
+  left: 24%;
+  top: 38%;
+  width: 52%;
+  transform: rotate(17deg);
+}
+
+.mini-graph::after {
+  left: 34%;
+  top: 66%;
+  width: 42%;
+  transform: rotate(-22deg);
+}
+
+.mini-graph span {
+  position: absolute;
+  z-index: 1;
+  display: inline-flex;
+  min-width: 7.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(36, 53, 45, 0.14);
+  background: white;
+  padding: 0.85rem 1rem;
+  color: #24352d;
+  font-size: 0.85rem;
+  font-weight: 700;
+  opacity: 0;
+  animation: node-pop 620ms ease forwards;
+}
+
+.mini-graph span:nth-child(1) {
+  left: 10%;
+  top: 20%;
+}
+
+.mini-graph span:nth-child(2) {
+  left: 24%;
+  bottom: 18%;
+}
+
+.mini-graph span:nth-child(3) {
+  right: 10%;
+  top: 42%;
+}
+
+.mini-graph span:nth-child(4) {
+  right: 18%;
+  top: 12%;
+}
+
+.bento-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.035)),
+    #151e19;
+  padding: clamp(1.25rem, 2vw, 1.6rem);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.2);
+  transition:
+    transform 220ms ease,
+    border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.bento-card:hover {
+  border-color: rgba(242, 109, 33, 0.34);
+  box-shadow:
+    0 28px 84px rgba(0, 0, 0, 0.26),
+    0 0 42px rgba(242, 109, 33, 0.12);
+  transform: translateY(-4px) scale(1.02);
+}
+
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(47, 111, 94, 0.22);
+  border-radius: 999px;
+  background: rgba(241, 250, 245, 0.9);
+  padding: 0.35rem 0.65rem;
+  color: #205545;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.live-badge span {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #28c76f;
+  box-shadow: 0 0 0 rgba(40, 199, 111, 0.5);
+  animation: live-pulse 1.35s ease-out infinite;
+}
+
+.graph-edge {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+}
+
+.graph-in-view .graph-edge {
+  animation: draw-edge 1s ease forwards;
+}
+
+.memory-node {
+  overflow: visible;
+}
+
+.graph-in-view .memory-node {
+  animation: graph-node-materialize 520ms cubic-bezier(0.2, 0.9, 0.25, 1.25) both;
+}
+
+.memory-node-pulse {
+  position: absolute;
+  inset: -0.55rem;
+  z-index: -1;
+  border-radius: inherit;
+  border: 1px solid currentColor;
+  opacity: 0.12;
+  animation: memory-pulse 3s ease-out infinite;
+}
+
+@keyframes node-pop {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.84);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes draw-edge {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes graph-node-materialize {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes memory-pulse {
+  0% {
+    opacity: 0.18;
+    transform: scale(0.96);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.28);
+  }
+}
+
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(40, 199, 111, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(40, 199, 111, 0);
+  }
+}
+
+@media (max-width: 1023px) {
+  .story-panel {
+    width: 100%;
+    min-height: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}

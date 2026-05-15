@@ -258,6 +258,7 @@ export default function MemoryGraph() {
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
   const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
+  const [introVisible, setIntroVisible] = useState(false);
   const graphRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
@@ -362,6 +363,28 @@ export default function MemoryGraph() {
     };
   }, [fetchGraph]);
 
+  useEffect(() => {
+    const graph = graphRef.current;
+
+    if (!graph) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIntroVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.32 },
+    );
+
+    observer.observe(graph);
+
+    return () => observer.disconnect();
+  }, []);
+
   async function selectNode(node: MemoryNode) {
     setSelectedId(node.id);
 
@@ -429,7 +452,7 @@ export default function MemoryGraph() {
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] ${introVisible ? "graph-in-view" : ""}`}>
       <div
         ref={graphRef}
         className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#24352d]/10 bg-[#fbfaf5] shadow-[0_24px_70px_rgba(36,53,45,0.12)] touch-none sm:min-h-[500px]"
@@ -472,7 +495,7 @@ export default function MemoryGraph() {
           }}
         >
           <svg className="absolute inset-0 h-full w-full" role="presentation">
-            {edges.map((edge) => {
+            {edges.map((edge, index) => {
               const start = nodes.find((node) => node.id === edge.source);
               const end = nodes.find((node) => node.id === edge.target);
 
@@ -483,6 +506,7 @@ export default function MemoryGraph() {
               return (
                 <g className="group" key={edge.id}>
                   <line
+                    className="graph-edge"
                     x1={`${start.x}%`}
                     y1={`${start.y}%`}
                     x2={`${end.x}%`}
@@ -490,6 +514,7 @@ export default function MemoryGraph() {
                     stroke="#9aa79d"
                     strokeOpacity={String(0.32 + (edge.strength ?? 0.7) * 0.28)}
                     strokeWidth={String(1 + (edge.strength ?? 0.7))}
+                    style={{ animationDelay: `${index * 160}ms` }}
                   />
                   {edge.label ? (
                     <text
@@ -519,7 +544,7 @@ export default function MemoryGraph() {
           </p>
         </div>
 
-          {nodes.map((node) => {
+          {nodes.map((node, index) => {
             const isSelected = node.id === selectedNode?.id;
             const isNew = newNodeIds.has(node.id);
 
@@ -527,10 +552,10 @@ export default function MemoryGraph() {
               <button
                 key={node.id}
                 type="button"
-                className={`absolute w-[9.75rem] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-3 py-3 text-left shadow-[0_16px_38px_rgba(36,53,45,0.12)] transition-[opacity,transform,box-shadow] duration-500 active:cursor-grabbing ${kindClass[node.kind]} ${
+                className={`memory-node absolute w-[9.75rem] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-3 py-3 text-left shadow-[0_16px_38px_rgba(36,53,45,0.12)] transition-[opacity,transform,box-shadow] duration-500 active:cursor-grabbing ${kindClass[node.kind]} ${
                   isSelected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-[calc(50%+2px)]"
                 } ${isNew ? "scale-0 opacity-0" : "scale-100 opacity-100"}`}
-                style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                style={{ left: `${node.x}%`, top: `${node.y}%`, animationDelay: `${index * 200}ms` }}
                 onClick={() => {
                   void selectNode(node);
                 }}
@@ -551,6 +576,7 @@ export default function MemoryGraph() {
                   };
                 }}
               >
+                <span className="memory-node-pulse" aria-hidden="true" />
                 <span className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em]">
                   {node.kind}
                 </span>
