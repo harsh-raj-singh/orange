@@ -256,14 +256,37 @@ export default function MemoryGraph() {
   const [selectedId, setSelectedId] = useState("cors");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
+  const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
+  const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
   const graphRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
+  const panRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
+  const seenNodeIdsRef = useRef(new Set(memoryNodes.map((node) => node.id)));
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedId) ?? nodes[0],
     [nodes, selectedId],
   );
   const selectedDate = formatDate(selectedNode?.metadata?.createdAt);
+
+  const resolveOverlaps = useCallback((input: MemoryNode[]) => {
+    const next = input.map((node) => ({ ...node }));
+
+    for (let i = 0; i < next.length; i += 1) {
+      for (let j = i + 1; j < next.length; j += 1) {
+        const dx = next[j].x - next[i].x;
+        const dy = next[j].y - next[i].y;
+
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 8) {
+          const direction = j % 2 === 0 ? 1 : -1;
+          next[j].x = clampPosition(next[j].x + 8 * direction, 12, 88);
+          next[j].y = clampPosition(next[j].y + 6, 14, 84);
+        }
+      }
+    }
+
+    return next;
+  }, []);
 
   const fetchGraph = useCallback(async (showRefreshing = true) => {
     if (showRefreshing) {
@@ -293,7 +316,16 @@ export default function MemoryGraph() {
               .filter((node): node is MemoryNode => Boolean(node))
           : [];
 
-        return nextNodes.length > 0 ? nextNodes : current;
+        const freshIds = nextNodes
+          .map((node) => node.id)
+          .filter((id) => !seenNodeIdsRef.current.has(id));
+        freshIds.forEach((id) => seenNodeIdsRef.current.add(id));
+        if (freshIds.length > 0) {
+          setNewNodeIds(new Set(freshIds));
+          window.setTimeout(() => setNewNodeIds(new Set()), 500);
+        }
+
+        return nextNodes.length > 0 ? resolveOverlaps(nextNodes) : current;
       });
 
       if (Array.isArray(graph.edges)) {
@@ -307,7 +339,7 @@ export default function MemoryGraph() {
         setIsRefreshing(false);
       }
     }
-  }, []);
+  }, [resolveOverlaps]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => {
@@ -384,42 +416,99 @@ export default function MemoryGraph() {
     );
   }
 
+  function movePan(clientX: number, clientY: number) {
+    const pan = panRef.current;
+    if (!pan) {
+      return;
+    }
+    setViewport((current) => ({
+      ...current,
+      x: pan.x + clientX - pan.startX,
+      y: pan.y + clientY - pan.startY,
+    }));
+  }
+
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div
         ref={graphRef}
         className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#24352d]/10 bg-[#fbfaf5] shadow-[0_24px_70px_rgba(36,53,45,0.12)] touch-none sm:min-h-[500px]"
-        onPointerMove={(event) => moveNode(event.clientX, event.clientY)}
+        onWheel={(event) => {
+          event.preventDefault();
+          setViewport((current) => ({
+            ...current,
+            scale: Math.min(1.8, Math.max(0.72, current.scale + (event.deltaY > 0 ? -0.08 : 0.08))),
+          }));
+        }}
+        onPointerDown={(event) => {
+          if (event.target !== event.currentTarget) {
+            return;
+          }
+          panRef.current = {
+            x: viewport.x,
+            y: viewport.y,
+            startX: event.clientX,
+            startY: event.clientY,
+          };
+        }}
+        onPointerMove={(event) => {
+          moveNode(event.clientX, event.clientY);
+          movePan(event.clientX, event.clientY);
+        }}
         onPointerUp={() => {
           dragRef.current = null;
+          panRef.current = null;
         }}
         onPointerLeave={() => {
           dragRef.current = null;
+          panRef.current = null;
         }}
       >
-        <svg className="absolute inset-0 h-full w-full" role="presentation">
-          {edges.map((edge) => {
-            const start = nodes.find((node) => node.id === edge.source);
-            const end = nodes.find((node) => node.id === edge.target);
+        <div
+          className="absolute inset-0"
+          style={{
+            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+            transformOrigin: "50% 50%",
+          }}
+        >
+          <svg className="absolute inset-0 h-full w-full" role="presentation">
+            {edges.map((edge) => {
+              const start = nodes.find((node) => node.id === edge.source);
+              const end = nodes.find((node) => node.id === edge.target);
 
-            if (!start || !end) {
-              return null;
-            }
+              if (!start || !end) {
+                return null;
+              }
 
-            return (
-              <line
-                key={edge.id}
-                x1={`${start.x}%`}
-                y1={`${start.y}%`}
-                x2={`${end.x}%`}
-                y2={`${end.y}%`}
-                stroke="#9aa79d"
-                strokeOpacity={String(0.32 + (edge.strength ?? 0.7) * 0.28)}
-                strokeWidth={String(1 + (edge.strength ?? 0.7))}
-              />
-            );
-          })}
-        </svg>
+              return (
+                <g className="group" key={edge.id}>
+                  <line
+                    x1={`${start.x}%`}
+                    y1={`${start.y}%`}
+                    x2={`${end.x}%`}
+                    y2={`${end.y}%`}
+                    stroke="#9aa79d"
+                    strokeOpacity={String(0.32 + (edge.strength ?? 0.7) * 0.28)}
+                    strokeWidth={String(1 + (edge.strength ?? 0.7))}
+                  />
+                  {edge.label ? (
+                    <text
+                      x={`${(start.x + end.x) / 2}%`}
+                      y={`${(start.y + end.y) / 2}%`}
+                      className="opacity-0 transition-opacity group-hover:opacity-100"
+                      fill="#8f3b14"
+                      fontSize="10"
+                      fontWeight="700"
+                      pointerEvents="none"
+                      textAnchor="middle"
+                    >
+                      {edge.label}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })}
+          </svg>
 
         <div className="absolute left-5 top-5 rounded-md border border-[#24352d]/10 bg-white/88 px-3 py-2 shadow-sm backdrop-blur">
           <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#c5551c]">
@@ -430,43 +519,46 @@ export default function MemoryGraph() {
           </p>
         </div>
 
-        {nodes.map((node) => {
-          const isSelected = node.id === selectedNode?.id;
+          {nodes.map((node) => {
+            const isSelected = node.id === selectedNode?.id;
+            const isNew = newNodeIds.has(node.id);
 
-          return (
-            <button
-              key={node.id}
-              type="button"
-              className={`absolute w-[9.75rem] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-3 py-3 text-left shadow-[0_16px_38px_rgba(36,53,45,0.12)] transition active:cursor-grabbing ${kindClass[node.kind]} ${
-                isSelected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-[calc(50%+2px)]"
-              }`}
-              style={{ left: `${node.x}%`, top: `${node.y}%` }}
-              onClick={() => {
-                void selectNode(node);
-              }}
-              onPointerDown={(event) => {
-                const bounds = graphRef.current?.getBoundingClientRect();
+            return (
+              <button
+                key={node.id}
+                type="button"
+                className={`absolute w-[9.75rem] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-3 py-3 text-left shadow-[0_16px_38px_rgba(36,53,45,0.12)] transition-[opacity,transform,box-shadow] duration-500 active:cursor-grabbing ${kindClass[node.kind]} ${
+                  isSelected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-[calc(50%+2px)]"
+                } ${isNew ? "scale-0 opacity-0" : "scale-100 opacity-100"}`}
+                style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                onClick={() => {
+                  void selectNode(node);
+                }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  const bounds = graphRef.current?.getBoundingClientRect();
 
-                if (!bounds) {
-                  return;
-                }
+                  if (!bounds) {
+                    return;
+                  }
 
-                event.currentTarget.setPointerCapture(event.pointerId);
-                setSelectedId(node.id);
-                dragRef.current = {
-                  id: node.id,
-                  dx: event.clientX - (bounds.left + (node.x / 100) * bounds.width),
-                  dy: event.clientY - (bounds.top + (node.y / 100) * bounds.height),
-                };
-              }}
-            >
-              <span className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em]">
-                {node.kind}
-              </span>
-              <span className="mt-1 block text-sm font-semibold leading-5">{node.label}</span>
-            </button>
-          );
-        })}
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  setSelectedId(node.id);
+                  dragRef.current = {
+                    id: node.id,
+                    dx: event.clientX - (bounds.left + (node.x / 100) * bounds.width),
+                    dy: event.clientY - (bounds.top + (node.y / 100) * bounds.height),
+                  };
+                }}
+              >
+                <span className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em]">
+                  {node.kind}
+                </span>
+                <span className="mt-1 block text-sm font-semibold leading-5">{node.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <aside className="rounded-lg border border-[#24352d]/10 bg-white p-5 shadow-[0_18px_46px_rgba(36,53,45,0.10)]">

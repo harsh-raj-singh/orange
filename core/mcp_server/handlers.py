@@ -152,6 +152,7 @@ async def handle_ping_context(
     if not user_id:
         raise ValueError("user_id is required")
     _parse_source(req.source)
+    min_score = float(getattr(req, "min_score", 0.70))
 
     collection = get_or_create_orange_collection(chroma)
 
@@ -191,6 +192,8 @@ async def handle_ping_context(
         if not neo4j_node_id:
             continue
         similarity_score = round(1.0 - float(distance), 4) if distance is not None else 0.0
+        if similarity_score < min_score:
+            continue
 
         # Step 3: Type-aware Neo4j fetch
         if node_type == "Problem":
@@ -359,6 +362,7 @@ async def handle_store_session(
         problems_created=result.get("problems_created", 0),
         problems_merged=result.get("problems_merged", 0),
         solutions_written=result.get("solutions_written", 0),
+        errors=list(result.get("errors") or []),
     )
     _STORE_SESSION_CACHE[cache_key] = response
     return response

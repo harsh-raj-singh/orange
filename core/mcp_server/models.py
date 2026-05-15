@@ -10,6 +10,7 @@ class PingContextRequest:
     query: str
     user_id: str
     source: str
+    min_score: float = 0.70
 
 
 @dataclass
@@ -53,6 +54,7 @@ class StoreSessionResponse:
     problems_created: int
     problems_merged: int
     solutions_written: int
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass

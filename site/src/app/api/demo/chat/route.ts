@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { orangeBackendFetch } from "@/lib/orange-backend";
 
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
@@ -25,6 +26,29 @@ type DemoChatRequest = {
   max_tokens?: number;
 };
 
+type MemoryMatch = {
+  id: string;
+  label: string;
+  node_type: string;
+  similarity_score: number;
+};
+
+type PingContextResponse = {
+  matched_nodes?: Array<{
+    node_type?: string;
+    similarity_score?: number;
+    node_data?: {
+      canonical_label?: string;
+      description?: string;
+      in_depth_summary?: string;
+      error_code?: string | null;
+      tech_stack?: string[];
+    };
+    neighborhood?: Record<string, unknown>;
+  }>;
+  node_ids_used?: string[];
+};
+
 type OpenAIChatResponse = {
   choices?: Array<{
     message?: {
@@ -47,21 +71,31 @@ function normalizeMessage(message: IncomingMessage) {
   return { role, content };
 }
 
-function createSystemPrompt(profile?: DemoProfile) {
+function createSystemPrompt(profile?: DemoProfile, memoryContext?: string) {
   const name = profile?.name?.trim() || "the user";
   const role = profile?.role?.trim() || "developer";
   const company = profile?.company?.trim() || "their company";
   const teamProject = profile?.teamProject?.trim() || "their current project";
 
-  return [
+  const lines = [
     "You are Orange, a concise developer memory fabric demo.",
     "Help the user reason through engineering work in a way that would create useful future memory.",
     "Prefer concrete causes, decisions, failed attempts, next actions, and file or system surfaces when the user gives them.",
     `User metadata: name=${name}; role=${role}; company=${company}; team_or_project=${teamProject}.`,
-  ].join("\n");
+  ];
+
+  if (memoryContext) {
+    lines.push(`Memory context:\n${memoryContext}`);
+  }
+
+  return lines.join("\n");
 }
 
-function buildOpenAIRequestBody(body: DemoChatRequest, messages: Array<{ role: "user" | "assistant"; content: string }>) {
+function buildOpenAIRequestBody(
+  body: DemoChatRequest,
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  memoryContext?: string,
+) {
   const model = process.env.OPENAI_CHAT_MODEL ?? body.model ?? DEFAULT_OPENAI_MODEL;
   const tokenLimit = body.max_tokens ?? 512;
   const requestBody: Record<string, unknown> = {
@@ -69,10 +103,11 @@ function buildOpenAIRequestBody(body: DemoChatRequest, messages: Array<{ role: "
     messages: [
       {
         role: "system",
-        content: createSystemPrompt(body.profile),
+        content: createSystemPrompt(body.profile, memoryContext),
       },
       ...messages,
     ],
+    stream: true,
   };
 
   if (model.startsWith("gpt-5")) {
@@ -83,6 +118,65 @@ function buildOpenAIRequestBody(body: DemoChatRequest, messages: Array<{ role: "
   }
 
   return requestBody;
+}
+
+function buildMemoryContext(memory?: PingContextResponse | null) {
+  const nodes = memory?.matched_nodes ?? [];
+  const nodeIds = memory?.node_ids_used ?? [];
+
+  const matches = nodes.map((node, index): MemoryMatch => {
+    const label = node.node_data?.canonical_label ?? `${node.node_type ?? "Memory"} ${index + 1}`;
+
+    return {
+      id: nodeIds[index] ?? label,
+      label,
+      node_type: node.node_type ?? "Memory",
+      similarity_score: node.similarity_score ?? 0,
+    };
+  });
+
+  const context = nodes
+    .map((node, index) => {
+      const label = node.node_data?.canonical_label ?? `Memory ${index + 1}`;
+      const description =
+        node.node_data?.description ??
+        node.node_data?.in_depth_summary ??
+        "No stored description.";
+      const neighborhood = node.neighborhood
+        ? `\nNeighborhood: ${JSON.stringify(node.neighborhood).slice(0, 900)}`
+        : "";
+
+      return `- ${label} (${node.node_type}, score=${node.similarity_score}): ${description}${neighborhood}`;
+    })
+    .join("\n");
+
+  return {
+    context,
+    matches,
+    nodeIds,
+  };
+}
+
+async function fetchMemoryContext(body: DemoChatRequest, latestUserMessage: string) {
+  try {
+    const memory = await orangeBackendFetch<PingContextResponse>("/demo/ping_context", {
+      method: "POST",
+      body: {
+        profile: body.profile,
+        query: latestUserMessage,
+        source: "cursor",
+        min_score: 0.7,
+      },
+    });
+    return buildMemoryContext(memory);
+  } catch (error) {
+    console.warn("orange_backend_ping_failed", error);
+    return buildMemoryContext(null);
+  }
+}
+
+function sse(event: string, data: unknown) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
 export const dynamic = "force-dynamic";
@@ -128,6 +222,9 @@ export async function POST(request: Request) {
     );
   }
 
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+  const memory = await fetchMemoryContext(body, latestUserMessage);
+
   const timeoutMs = Number(process.env.OPENAI_CHAT_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -141,7 +238,7 @@ export async function POST(request: Request) {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(buildOpenAIRequestBody(body, messages)),
+      body: JSON.stringify(buildOpenAIRequestBody(body, messages, memory.context)),
     });
   } catch (error) {
     const isAbort =
@@ -160,16 +257,15 @@ export async function POST(request: Request) {
     clearTimeout(timeout);
   }
 
-  const responseText = await upstreamResponse.text();
-  let responseBody: unknown = responseText;
-
-  try {
-    responseBody = responseText ? JSON.parse(responseText) : {};
-  } catch {
-    responseBody = { error: responseText };
-  }
-
   if (!upstreamResponse.ok) {
+    const responseText = await upstreamResponse.text();
+    let responseBody: unknown = responseText;
+
+    try {
+      responseBody = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      responseBody = { error: responseText };
+    }
     return NextResponse.json(
       {
         error:
@@ -184,14 +280,97 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = responseBody as OpenAIChatResponse;
-  const message = parsed.choices?.[0]?.message?.content;
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let fullMessage = "";
 
-  return NextResponse.json({
-    message:
-      typeof message === "string" && message.trim()
-        ? message
-        : "I received the turn, but the model returned an empty response.",
-    sessionId: body.sessionId,
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          sse("memory", {
+            memory_used: memory.matches.length > 0,
+            node_ids: memory.nodeIds,
+            matches: memory.matches,
+          }),
+        ),
+      );
+
+      const reader = upstreamResponse.body?.getReader();
+      if (!reader) {
+        controller.enqueue(
+          encoder.encode(
+            sse("done", {
+              message: "",
+              sessionId: body.sessionId,
+              memory_used: memory.matches.length > 0,
+              node_ids: memory.nodeIds,
+              matches: memory.matches,
+            }),
+          ),
+        );
+        controller.close();
+        return;
+      }
+
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) {
+            continue;
+          }
+
+          const payload = trimmed.slice(5).trim();
+          if (!payload || payload === "[DONE]") {
+            continue;
+          }
+
+          try {
+            const chunk = JSON.parse(payload) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+            const delta = chunk.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullMessage += delta;
+              controller.enqueue(encoder.encode(sse("delta", { text: delta })));
+            }
+          } catch {
+            // Ignore malformed upstream stream fragments.
+          }
+        }
+      }
+
+      controller.enqueue(
+        encoder.encode(
+          sse("done", {
+            message: fullMessage,
+            sessionId: body.sessionId,
+            memory_used: memory.matches.length > 0,
+            node_ids: memory.nodeIds,
+            matches: memory.matches,
+          }),
+        ),
+      );
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
   });
 }

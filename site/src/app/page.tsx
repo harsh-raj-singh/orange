@@ -262,7 +262,7 @@ retrieval:
               Chat first. Store only when the session is done.
             </h2>
             <p className="mt-5 text-lg leading-8 text-[#536057]">
-              Add a profile, talk to the NVIDIA-backed demo agent, then mark the conversation done to watch Orange add the session into the shared graph.
+              Add a profile, talk to the OpenAI-backed demo agent, then mark the conversation done to watch Orange add the session into the shared graph.
             </p>
           </div>
           <TestChat />

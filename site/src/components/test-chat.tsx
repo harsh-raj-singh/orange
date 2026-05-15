@@ -13,6 +13,14 @@ type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  memory?: MemoryReference[];
+};
+
+type MemoryReference = {
+  id: string;
+  label: string;
+  node_type: string;
+  similarity_score: number;
 };
 
 type CompletionTrigger = "user_done" | "pagehide";
@@ -22,6 +30,8 @@ type ChatResponse = {
   content?: string;
   reply?: string;
   sessionId?: string;
+  memory_used?: boolean;
+  matches?: MemoryReference[];
 };
 
 const emptyProfile: Profile = {
@@ -53,6 +63,29 @@ function createId(prefix: string) {
 
 function getAssistantText(data: ChatResponse) {
   return data.message ?? data.content ?? data.reply ?? "I saved that turn, but the demo did not return a response.";
+}
+
+function parseServerEventBlock(block: string) {
+  const event = block
+    .split("\n")
+    .find((line) => line.startsWith("event:"))
+    ?.slice("event:".length)
+    .trim();
+  const data = block
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trim())
+    .join("\n");
+
+  if (!event || !data) {
+    return null;
+  }
+
+  try {
+    return { event, data: JSON.parse(data) as ChatResponse & { text?: string } };
+  } catch {
+    return null;
+  }
 }
 
 export default function TestChat() {
@@ -210,18 +243,87 @@ export default function TestChat() {
         throw new Error(errorBody?.error ?? "Chat request failed.");
       }
 
-      const data = (await response.json()) as ChatResponse;
-      const assistantMessage: ChatMessage = {
-        id: createId("assistant"),
-        role: "assistant",
-        content: getAssistantText(data),
-      };
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("text/event-stream") || !response.body) {
+        const data = (await response.json()) as ChatResponse;
+        const assistantMessage: ChatMessage = {
+          id: createId("assistant"),
+          role: "assistant",
+          content: getAssistantText(data),
+          memory: data.memory_used ? data.matches : undefined,
+        };
 
-      if (data.sessionId) {
-        setSessionId(data.sessionId);
+        if (data.sessionId) {
+          setSessionId(data.sessionId);
+        }
+
+        setMessages((current) => [...current, assistantMessage]);
+        return;
       }
 
-      setMessages((current) => [...current, assistantMessage]);
+      const assistantId = createId("assistant");
+      let assistantContent = "";
+      let memory: MemoryReference[] | undefined;
+      setMessages((current) => [
+        ...current,
+        { id: assistantId, role: "assistant", content: "", memory },
+      ]);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() ?? "";
+
+        for (const block of blocks) {
+          const parsed = parseServerEventBlock(block);
+          if (!parsed) {
+            continue;
+          }
+
+          if (parsed.event === "memory") {
+            memory = parsed.data.memory_used ? parsed.data.matches : undefined;
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId ? { ...message, memory } : message,
+              ),
+            );
+          }
+
+          if (parsed.event === "delta" && parsed.data.text) {
+            assistantContent += parsed.data.text;
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? { ...message, content: assistantContent || " " }
+                  : message,
+              ),
+            );
+          }
+
+          if (parsed.event === "done") {
+            if (parsed.data.sessionId) {
+              setSessionId(parsed.data.sessionId);
+            }
+            if (!assistantContent) {
+              assistantContent = getAssistantText(parsed.data);
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, content: assistantContent, memory } : message,
+                ),
+              );
+            }
+          }
+        }
+      }
     } catch (error) {
       setMessages(nextMessages);
       setError(
@@ -349,6 +451,23 @@ export default function TestChat() {
                     <p className="mb-1 font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#5f746b]">
                       {message.role === "user" ? profile.name : "Orange"}
                     </p>
+                    {message.role === "assistant" && message.memory?.length ? (
+                      <div className="mb-2 flex flex-wrap gap-1.5">
+                        <span className="rounded-full border border-[#2f6f5e]/25 bg-[#f1faf5] px-2 py-1 font-mono text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-[#2f6f5e]">
+                          Retrieved from memory
+                        </span>
+                        {message.memory.map((memoryNode) => (
+                          <a
+                            className="rounded-full border border-[#c5551c]/20 bg-[#fff8ec] px-2 py-1 text-xs font-semibold text-[#8f3b14] transition hover:border-[#c5551c]"
+                            href="#graph"
+                            key={memoryNode.id}
+                            title={`${memoryNode.node_type} · score ${memoryNode.similarity_score}`}
+                          >
+                            {memoryNode.label}
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
                     <p className="whitespace-pre-wrap">{message.content}</p>
                   </article>
                 </div>

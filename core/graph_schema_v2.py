@@ -442,6 +442,7 @@ class EdgeType(str, Enum):
     RECURS_AS = "RECURS_AS"
     TRIED_IN = "TRIED_IN"
     RELATED_TO = "RELATED_TO"
+    SIMILAR_TO = "SIMILAR_TO"
 
     # new
     CAUSED_BY = "CAUSED_BY"  # Problem → Problem (child caused by parent's attempted fix)
@@ -524,6 +525,16 @@ class RelatedToEdge:
 
 
 @dataclass(frozen=True)
+class SimilarToEdge:
+    """Problem -> Problem semantic similarity link."""
+
+    from_node_type: Literal[NodeType.PROBLEM] = NodeType.PROBLEM
+    to_node_type: Literal[NodeType.PROBLEM] = NodeType.PROBLEM
+    edge_type: Literal[EdgeType.SIMILAR_TO] = EdgeType.SIMILAR_TO
+    similarity_score: float | None = None
+
+
+@dataclass(frozen=True)
 class CausedByEdge:
     """Child problem caused by a solution attempt on parent problem."""
 
@@ -578,6 +589,7 @@ EdgeModel = Union[
     RecursAsEdge,
     TriedInEdge,
     RelatedToEdge,
+    SimilarToEdge,
     CausedByEdge,
     TriggeredByEdge,
     AttemptedByEdge,
@@ -615,6 +627,9 @@ _ALLOWED_EDGE_DIRECTIONS: dict[EdgeType, set[tuple[NodeType, NodeType]]] = {
         (NodeType.SOLUTION, NodeType.SESSION),
     },
     EdgeType.RELATED_TO: {
+        (NodeType.PROBLEM, NodeType.PROBLEM),
+    },
+    EdgeType.SIMILAR_TO: {
         (NodeType.PROBLEM, NodeType.PROBLEM),
     },
     EdgeType.CAUSED_BY: {
@@ -674,6 +689,7 @@ def validate_edge(edge: EdgeModel, source_node: BaseModel, target_node: BaseMode
             RecursAsEdge,
             TriedInEdge,
             RelatedToEdge,
+            SimilarToEdge,
             CausedByEdge,
             TriggeredByEdge,
             AttemptedByEdge,

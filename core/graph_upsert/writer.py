@@ -48,6 +48,7 @@ class UpsertSummary:
     solutions_written: int = 0
     cross_session_links_written: int = 0
     related_to_edges_written: int = 0
+    similar_to_edges_written: int = 0
     edges_written: int = 0
     edges_skipped: int = 0
     skipped_by_idempotency: int = 0
@@ -60,6 +61,16 @@ def content_hash(node_type: str, session_id: str, canonical_label: str) -> str:
 
 def _source_value(source: SourceType | str) -> str:
     return source.value if isinstance(source, SourceType) else str(source)
+
+
+def problem_node_id_for(user_id: str, canonical_label: str) -> str:
+    return f"problem_{hashlib.sha256(f'{user_id}:{canonical_label}'.encode()).hexdigest()[:16]}"
+
+
+def solution_node_id_for(user_id: str, canonical_label: str, attempt_number: int) -> str:
+    return (
+        f"solution_{hashlib.sha256(f'{user_id}:{canonical_label}:{attempt_number}'.encode()).hexdigest()[:16]}"
+    )
 
 
 class GraphUpsertEngine:
@@ -120,9 +131,7 @@ class GraphUpsertEngine:
         Uses MERGE so re-runs are idempotent on node_id.
         Returns node_id.
         """
-        import hashlib, json as _json
-
-        node_id = f"problem_{hashlib.sha256(f'{user_id}:{problem.canonical_label}'.encode()).hexdigest()[:16]}"
+        node_id = problem_node_id_for(user_id, problem.canonical_label)
 
         self._run_neo4j(
             """
@@ -181,11 +190,7 @@ class GraphUpsertEngine:
         Writes a Solution node with v2 schema fields.
         Returns node_id.
         """
-        import hashlib
-
-        node_id = (
-            f"solution_{hashlib.sha256(f'{user_id}:{solution.canonical_label}:{solution.attempt_number}'.encode()).hexdigest()[:16]}"
-        )
+        node_id = solution_node_id_for(user_id, solution.canonical_label, solution.attempt_number)
 
         self._run_neo4j(
             """
@@ -292,6 +297,7 @@ class GraphUpsertEngine:
 
         # --- PROBLEMS ---
         for problem in issue_output.problems:
+            similar_problem = self._find_similar_problem_v2(problem=problem, user_id=user_id)
             node_id = self._create_problem_v2(problem=problem, user_id=user_id, source=session.source)
             label_to_node_id[problem.canonical_label] = node_id
             self._upsert_chroma_document(
@@ -312,6 +318,15 @@ class GraphUpsertEngine:
                 properties={},
                 summary=summary,
             )
+            if similar_problem and similar_problem["node_id"] != node_id:
+                self._run_edge_direct(
+                    from_id=node_id,
+                    to_id=similar_problem["node_id"],
+                    edge_type="SIMILAR_TO",
+                    properties={"similarity_score": similar_problem["similarity_score"]},
+                    summary=summary,
+                )
+                summary.similar_to_edges_written += 1
 
         for problem in issue_output.problems:
             if not problem.parent_segment_id:
@@ -406,6 +421,51 @@ class GraphUpsertEngine:
                     )
 
         return summary
+
+    def _find_similar_problem_v2(
+        self,
+        *,
+        problem: EnrichedProblem,
+        user_id: str,
+        threshold: float = 0.88,
+    ) -> dict[str, Any] | None:
+        document = f"{problem.canonical_label} - {problem.description}".strip()
+        if not document:
+            return None
+
+        try:
+            result = self.collection.query(
+                query_texts=[document],
+                n_results=3,
+                where={"node_type": "Problem", "user_id": user_id},
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+        ids = (result or {}).get("ids") or [[]]
+        distances = (result or {}).get("distances") or [[]]
+        metadatas = (result or {}).get("metadatas") or [[]]
+
+        for vector_id, distance, metadata in zip(
+            ids[0] if ids else [],
+            distances[0] if distances else [],
+            metadatas[0] if metadatas else [],
+        ):
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("node_type") != "Problem" or metadata.get("user_id") != user_id:
+                continue
+            try:
+                similarity_score = round(1.0 - float(distance), 4)
+            except Exception:  # noqa: BLE001
+                continue
+            if similarity_score < threshold:
+                continue
+            node_id = str(metadata.get("neo4j_node_id") or vector_id or "").strip()
+            if node_id:
+                return {"node_id": node_id, "similarity_score": similarity_score}
+
+        return None
 
     def _write_concepts(
         self,
