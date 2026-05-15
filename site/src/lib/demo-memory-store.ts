@@ -13,8 +13,19 @@ type DemoChatMessage = {
   content?: unknown;
 };
 
+type DemoMemoryScope = "user" | "global" | "both";
+
+type ScopedDemoMemoryNode = DemoMemoryNode & {
+  metadata: DemoMemoryNode["metadata"] & {
+    email?: string;
+    scope?: Exclude<DemoMemoryScope, "both">;
+    contribute_to_global?: boolean;
+  };
+};
+
 export type DemoConversationProfile = {
   name?: string;
+  email?: string;
   role?: string;
   company?: string;
   team?: string;
@@ -28,6 +39,7 @@ export type CompleteDemoConversationInput = {
   source?: string;
   profile?: DemoConversationProfile;
   messages?: DemoChatMessage[];
+  contribute_to_global?: boolean;
 };
 
 type DemoMemoryGraphSnapshot = {
@@ -37,7 +49,7 @@ type DemoMemoryGraphSnapshot = {
 };
 
 type DemoMemoryStoreState = {
-  nodes: Map<string, DemoMemoryNode>;
+  nodes: Map<string, ScopedDemoMemoryNode>;
   edges: Map<string, DemoMemoryEdge>;
   details: Map<string, DemoMemoryNodeDetail>;
   completedSessions: Set<string>;
@@ -47,10 +59,13 @@ const globalStore = globalThis as typeof globalThis & {
   __orangeDemoMemoryStore?: DemoMemoryStoreState;
 };
 
-function cloneNode(node: DemoMemoryNode): DemoMemoryNode {
+function cloneNode(node: DemoMemoryNode): ScopedDemoMemoryNode {
   return {
     ...node,
-    metadata: { ...node.metadata },
+    metadata: {
+      ...node.metadata,
+      scope: (node.metadata as ScopedDemoMemoryNode["metadata"]).scope ?? "global",
+    },
   };
 }
 
@@ -67,6 +82,35 @@ function cloneDetail(detail: DemoMemoryNodeDetail): DemoMemoryNodeDetail {
       evidence: [...detail.detail.evidence],
       relatedFiles: [...detail.detail.relatedFiles],
       nextActions: [...detail.detail.nextActions],
+    },
+  };
+}
+
+function sanitizeSharedNode(node: DemoMemoryNode): DemoMemoryNode {
+  const metadata = node.metadata as ScopedDemoMemoryNode["metadata"];
+
+  if (metadata.scope !== "global") {
+    return node;
+  }
+
+  return {
+    ...node,
+    metadata: {
+      project: metadata.project,
+      timestamp: metadata.timestamp,
+      date: metadata.date,
+      sessionId: metadata.sessionId,
+      source: metadata.source,
+      trigger: metadata.trigger,
+      repo: metadata.repo,
+      createdAt: metadata.createdAt,
+      status: metadata.status,
+      scope: metadata.scope,
+      contribute_to_global: metadata.contribute_to_global,
+      owner: "shared-knowledge",
+    } as DemoMemoryNode["metadata"] & {
+      scope?: Exclude<DemoMemoryScope, "both">;
+      contribute_to_global?: boolean;
     },
   };
 }
@@ -175,11 +219,17 @@ function inferNodeType(text: string, fallback: DemoMemoryNodeType): DemoMemoryNo
   return fallback;
 }
 
-function createMetadata(input: CompleteDemoConversationInput, createdAt: string) {
+function createMetadata(
+  input: CompleteDemoConversationInput,
+  createdAt: string,
+  scope: Exclude<DemoMemoryScope, "both"> = "user",
+) {
   const teamOrProject = input.profile?.teamProject ?? input.profile?.project ?? input.profile?.team;
+  const contributeToGlobal = input.contribute_to_global ?? true;
 
   return {
     name: input.profile?.name,
+    email: input.profile?.email,
     role: input.profile?.role,
     company: input.profile?.company,
     team: input.profile?.team ?? input.profile?.teamProject,
@@ -193,6 +243,8 @@ function createMetadata(input: CompleteDemoConversationInput, createdAt: string)
     repo: "orange-demo",
     createdAt,
     status: "active" as const,
+    scope,
+    contribute_to_global: contributeToGlobal,
   };
 }
 
@@ -214,14 +266,43 @@ export function getDemoMemoryGraphSnapshot(): DemoMemoryGraphSnapshot {
 
   return {
     generatedAt: new Date().toISOString(),
-    nodes: [...state.nodes.values()].map(cloneNode),
+    nodes: [...state.nodes.values()].map(cloneNode).map(sanitizeSharedNode),
     edges: [...state.edges.values()].map(cloneEdge),
+  };
+}
+
+export function getScopedDemoMemoryGraphSnapshot(scope: DemoMemoryScope = "both"): DemoMemoryGraphSnapshot {
+  const snapshot = getDemoMemoryGraphSnapshot();
+
+  if (scope === "both") {
+    return snapshot;
+  }
+
+  const visibleNodeIds = new Set(
+    snapshot.nodes
+      .filter((node) => ((node.metadata as ScopedDemoMemoryNode["metadata"]).scope ?? "global") === scope)
+      .map((node) => node.id),
+  );
+
+  return {
+    ...snapshot,
+    nodes: snapshot.nodes.filter((node) => visibleNodeIds.has(node.id)),
+    edges: snapshot.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
   };
 }
 
 export function getDemoMemoryNodeDetailFromStore(nodeId: string) {
   const detail = getState().details.get(nodeId);
-  return detail ? cloneDetail(detail) : null;
+  if (!detail) {
+    return null;
+  }
+
+  const clonedDetail = cloneDetail(detail);
+
+  return {
+    ...sanitizeSharedNode(clonedDetail),
+    detail: clonedDetail.detail,
+  } satisfies DemoMemoryNodeDetail;
 }
 
 export function completeDemoConversation(input: CompleteDemoConversationInput) {
@@ -247,8 +328,9 @@ export function completeDemoConversation(input: CompleteDemoConversationInput) {
   }
 
   const createdAt = new Date().toISOString();
-  const metadata = createMetadata({ ...input, sessionId }, createdAt);
+  const metadata = createMetadata({ ...input, sessionId }, createdAt, "user");
   const displayName = input.profile?.name ?? "Demo user";
+  const memoryAttribution = displayName;
   const project =
     input.profile?.teamProject ??
     input.profile?.project ??
@@ -268,7 +350,7 @@ export function completeDemoConversation(input: CompleteDemoConversationInput) {
     label: `${displayName} chat session`,
     type: "Session",
     summary: compactText(
-      `${displayName} completed a ${project} chat session: ${userPrompt}`,
+      `${memoryAttribution} completed a ${project} chat session: ${userPrompt}`,
       "Completed a demo chat session.",
       220,
     ),
@@ -348,6 +430,66 @@ export function completeDemoConversation(input: CompleteDemoConversationInput) {
       strength: 0.78 - index * 0.05,
     });
   });
+
+  if (input.contribute_to_global ?? true) {
+    const globalMetadata = createMetadata({ ...input, sessionId }, createdAt, "global");
+    const globalSessionNode: DemoMemoryNode = {
+      ...sessionNode,
+      id: `shared-${sessionNodeId}`,
+      label: "Shared chat session",
+      summary: compactText(
+        `A shared session captured reusable technical context: ${userPrompt}`,
+        "Completed an anonymous shared demo chat session.",
+        220,
+      ),
+      metadata: globalMetadata,
+    };
+
+    upsertNodeWithDetail(state, globalSessionNode, {
+      title: globalSessionNode.label,
+      body: compactText(conversationText, globalSessionNode.summary, 500),
+      evidence: [
+        "Contributed anonymously from a shared demo conversation.",
+        `Trigger: ${globalMetadata.trigger}.`,
+        `Source: ${globalMetadata.source}.`,
+      ],
+      relatedFiles: [],
+      nextActions: [
+        "Retrieve as shared technical context for similar demo conversations.",
+        "Keep private attribution out of global graph views.",
+      ],
+    });
+
+    memorySeed.forEach((item, index) => {
+      const node: DemoMemoryNode = {
+        id: `shared-${item.type.toLowerCase()}-${sessionKey}-${item.suffix}`,
+        label: item.label,
+        type: item.type,
+        summary: item.summary,
+        score: 0.8 - index * 0.04,
+        metadata: globalMetadata,
+      };
+
+      upsertNodeWithDetail(state, node, {
+        title: node.label,
+        body: node.summary,
+        evidence: [
+          "Derived from an anonymous shared demo conversation.",
+          `Session id: ${sessionId}.`,
+        ],
+        relatedFiles: [],
+        nextActions: ["Retrieve when future chat messages overlap this technical pattern."],
+      });
+
+      addEdge(state, {
+        id: `shared-edge-${sessionKey}-${item.suffix}`,
+        source: globalSessionNode.id,
+        target: node.id,
+        label: item.labelEdge,
+        strength: 0.76 - index * 0.05,
+      });
+    });
+  }
 
   state.completedSessions.add(sessionNodeId);
   return getDemoMemoryGraphSnapshot();

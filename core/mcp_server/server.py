@@ -16,7 +16,10 @@ from core.graph_queries.neo4j_queries import (
     get_node_with_neighborhood,
     get_session_subgraph,
 )
-from core.graph_upsert.dedup import ORANGE_NODE_VECTOR_COLLECTION
+from core.graph_upsert.dedup import (
+    ORANGE_GLOBAL_VECTOR_COLLECTION,
+    ORANGE_USER_VECTOR_COLLECTION,
+)
 from core.mcp_server.handlers import handle_ping_context, handle_resolve_problem, handle_store_session
 from core.mcp_server.models import (
     PingContextRequest,
@@ -143,8 +146,22 @@ def get_llm() -> Any:
 
 
 @_APP.tool()
-async def ping_context(query: str, user_id: str, source: str) -> dict:
-    req = PingContextRequest(query=query, user_id=user_id, source=source)
+async def ping_context(
+    query: str,
+    user_id: str,
+    source: str,
+    scope: str = "both",
+    user_email: str | None = None,
+    min_score: float = 0.70,
+) -> dict:
+    req = PingContextRequest(
+        query=query,
+        user_id=user_id,
+        source=source,
+        scope=scope,
+        user_email=user_email,
+        min_score=min_score,
+    )
     resp = await handle_ping_context(req, neo4j=get_neo4j(), chroma=get_chroma())
     return asdict(resp)
 
@@ -154,6 +171,7 @@ async def store_session(
     transcript: str,
     source: str,
     user_id: str = "",
+    user_email: str | None = None,
     session_id: str = "",
     org_id: str | None = None,
     external_session_id: str | None = None,
@@ -167,11 +185,13 @@ async def store_session(
     tool_metadata: dict[str, Any] | None = None,
     messages: list[dict[str, Any]] | None = None,
     metadata: dict[str, Any] | None = None,
+    contribute_to_global: bool = True,
 ) -> dict:
     req = StoreSessionRequest(
         transcript=transcript,
         source=source,
         user_id=user_id,
+        user_email=user_email,
         session_id=session_id,
         external_session_id=external_session_id,
         org_id=org_id,
@@ -185,6 +205,7 @@ async def store_session(
         tool_metadata=tool_metadata or {},
         messages=messages or [],
         metadata=metadata or {},
+        contribute_to_global=contribute_to_global,
     )
     resp = await handle_store_session(
         req,
@@ -229,12 +250,14 @@ async def list_sessions(user_id: str | None = None) -> list:
 
 
 @_APP.tool()
-async def chroma_peek(limit: int = 10) -> dict:
-    collection = get_chroma().get_collection(ORANGE_NODE_VECTOR_COLLECTION)
+async def chroma_peek(limit: int = 10, scope: str = "user") -> dict:
+    collection_name = ORANGE_GLOBAL_VECTOR_COLLECTION if scope == "global" else ORANGE_USER_VECTOR_COLLECTION
+    collection = get_chroma().get_collection(collection_name)
     results = collection.peek(limit)
     embeddings = results.get("embeddings") if isinstance(results, dict) else None
     return {
         "count": collection.count(),
+        "collection": collection_name,
         "ids": results.get("ids", []) if isinstance(results, dict) else [],
         "documents": results.get("documents", []) if isinstance(results, dict) else [],
         "embedding_dims": len(embeddings[0]) if embeddings else 0,

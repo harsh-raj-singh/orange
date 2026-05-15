@@ -11,6 +11,8 @@ class PingContextRequest:
     user_id: str
     source: str
     min_score: float = 0.70
+    user_email: str | None = None
+    scope: str = "both"
 
 
 @dataclass
@@ -19,6 +21,8 @@ class MatchedNode:
     similarity_score: float
     node_data: dict
     neighborhood: dict
+    source: str = "user"
+    also_available_in_global: bool = False
 
 
 @dataclass
@@ -33,6 +37,7 @@ class StoreSessionRequest:
     transcript: str = ""
     source: str = ""
     user_id: str = ""
+    user_email: str | None = None
     session_id: str = ""
     external_session_id: str | None = None
     org_id: str | None = None
@@ -46,6 +51,7 @@ class StoreSessionRequest:
     tool_metadata: dict[str, Any] = field(default_factory=dict)
     messages: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    contribute_to_global: bool = True
 
 
 @dataclass

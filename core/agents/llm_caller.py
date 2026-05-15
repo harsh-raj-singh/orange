@@ -7,6 +7,8 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+from core.agents.prompt_scope import active_extraction_prompt
+
 load_dotenv(override=True)
 
 _CLIENT: AsyncOpenAI | None = None
@@ -75,6 +77,9 @@ def _resolve_llm_config() -> tuple[str, str, str | None]:
 
 
 async def call_llm_json(system_prompt: str, user_content: str) -> dict:
+    scope_prompt = active_extraction_prompt()
+    if scope_prompt:
+        system_prompt = f"{system_prompt}\n\n{scope_prompt}"
     caller_id = system_prompt[:40].replace("\n", " ")
     api_key, model, base_url = _resolve_llm_config()
     client = _get_client(api_key=api_key, base_url=base_url)

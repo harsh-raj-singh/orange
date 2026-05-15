@@ -78,7 +78,8 @@ class GraphUpsertEngine:
 
     def __init__(self, neo4j: Any, chroma: Any, llm: Any = None) -> None:
         self.neo4j = neo4j
-        self.collection = get_or_create_orange_collection(chroma)
+        self.chroma = chroma
+        self.collection = get_or_create_orange_collection(chroma, scope="user")
         self.llm = llm
 
     def upsert(
@@ -125,18 +126,25 @@ class GraphUpsertEngine:
         problem: EnrichedProblem,
         user_id: str,
         source: SourceType | str,
+        scope: str = "user",
+        user_email: str | None = None,
+        contributed_by: str | None = None,
     ) -> str:
         """
         Writes a Problem node with the new v2 schema fields.
         Uses MERGE so re-runs are idempotent on node_id.
         Returns node_id.
         """
-        node_id = problem_node_id_for(user_id, problem.canonical_label)
+        node_owner = "global" if scope == "global" else user_id
+        node_id = problem_node_id_for(f"{scope}:{node_owner}", problem.canonical_label)
 
         self._run_neo4j(
             """
-            MERGE (p:Problem {node_id: $node_id, user_id: $user_id})
+            MERGE (p:Problem {node_id: $node_id, scope: $scope})
             SET p.canonical_label       = $canonical_label,
+                p.user_id               = $user_id,
+                p.user_email            = $user_email,
+                p.contributed_by        = $contributed_by,
                 p.description           = $description,
                 p.llm_reasoning         = $llm_reasoning,
                 p.error_code            = $error_code,
@@ -158,7 +166,10 @@ class GraphUpsertEngine:
             RETURN p.node_id AS node_id
             """,
             node_id=node_id,
-            user_id=user_id,
+            user_id=user_id if scope == "user" else None,
+            user_email=user_email,
+            contributed_by=contributed_by,
+            scope=scope,
             canonical_label=problem.canonical_label,
             description=problem.description,
             llm_reasoning=problem.llm_reasoning,
@@ -185,17 +196,24 @@ class GraphUpsertEngine:
         solution: ExtractedSolution,
         user_id: str,
         source: SourceType | str,
+        scope: str = "user",
+        user_email: str | None = None,
+        contributed_by: str | None = None,
     ) -> str:
         """
         Writes a Solution node with v2 schema fields.
         Returns node_id.
         """
-        node_id = solution_node_id_for(user_id, solution.canonical_label, solution.attempt_number)
+        node_owner = "global" if scope == "global" else user_id
+        node_id = solution_node_id_for(f"{scope}:{node_owner}", solution.canonical_label, solution.attempt_number)
 
         self._run_neo4j(
             """
-            MERGE (s:Solution {node_id: $node_id, user_id: $user_id})
+            MERGE (s:Solution {node_id: $node_id, scope: $scope})
             SET s.canonical_label        = $canonical_label,
+                s.user_id                = $user_id,
+                s.user_email             = $user_email,
+                s.contributed_by         = $contributed_by,
                 s.description            = $description,
                 s.in_depth_summary       = $in_depth_summary,
                 s.outcome                = $outcome,
@@ -215,7 +233,10 @@ class GraphUpsertEngine:
             RETURN s.node_id AS node_id
             """,
             node_id=node_id,
-            user_id=user_id,
+            user_id=user_id if scope == "user" else None,
+            user_email=user_email,
+            contributed_by=contributed_by,
+            scope=scope,
             canonical_label=solution.canonical_label,
             description=solution.description,
             in_depth_summary=solution.in_depth_summary,
@@ -243,6 +264,7 @@ class GraphUpsertEngine:
         edge_type: str,
         properties: dict,
         summary: UpsertSummary,
+        scope: str = "user",
     ) -> None:
         """
         Writes a directed edge between two nodes by node_id.
@@ -256,13 +278,13 @@ class GraphUpsertEngine:
             set_clause = ""
 
         query = f"""
-            MATCH (a {{node_id: $from_id}}), (b {{node_id: $to_id}})
+            MATCH (a {{node_id: $from_id, scope: $scope}}), (b {{node_id: $to_id, scope: $scope}})
             MERGE (a)-[r:{edge_type}]->(b)
             {set_clause}
         """
 
         try:
-            self._run_neo4j(query, from_id=from_id, to_id=to_id, **properties)
+            self._run_neo4j(query, from_id=from_id, to_id=to_id, scope=scope, **properties)
             summary.edges_written += 1
         except Exception as exc:
             summary.edges_skipped += 1
@@ -283,6 +305,9 @@ class GraphUpsertEngine:
         user_id: str,
         issue_output: IssueAgentOutput,
         solution_output: SolutionAgentOutput,
+        scope: str = "user",
+        user_email: str | None = None,
+        contributed_by: str | None = None,
     ) -> UpsertSummary:
         """
         New pipeline writer. Accepts output from Issue Agent + Solution Agent.
@@ -290,20 +315,39 @@ class GraphUpsertEngine:
         """
         summary = UpsertSummary()
         label_to_node_id: dict[str, str] = {}
+        scope = "global" if scope == "global" else "user"
+        identity = user_email or user_id
+        self.collection = get_or_create_orange_collection(self.chroma, scope=scope)
 
         validate_node(session)
-        self._merge_session(session=session, user_id=user_id)
+        self._merge_session(
+            session=session,
+            user_id=identity if scope == "user" else "",
+            scope=scope,
+            user_email=user_email,
+            contributed_by=contributed_by,
+        )
         summary.sessions_written += 1
 
         # --- PROBLEMS ---
         for problem in issue_output.problems:
-            similar_problem = self._find_similar_problem_v2(problem=problem, user_id=user_id)
-            node_id = self._create_problem_v2(problem=problem, user_id=user_id, source=session.source)
+            similar_problem = self._find_similar_problem_v2(problem=problem, user_id=identity, scope=scope)
+            node_id = self._create_problem_v2(
+                problem=problem,
+                user_id=identity,
+                source=session.source,
+                scope=scope,
+                user_email=user_email,
+                contributed_by=contributed_by,
+            )
             label_to_node_id[problem.canonical_label] = node_id
             self._upsert_chroma_document(
                 node_type="Problem",
                 node_id=node_id,
-                user_id=user_id,
+                user_id=identity,
+                scope=scope,
+                user_email=user_email,
+                contributed_by=contributed_by,
                 canonical_label=problem.canonical_label,
                 context_brief=problem.description[:120],
                 document=f"{problem.canonical_label} - {problem.description}".strip(),
@@ -316,6 +360,7 @@ class GraphUpsertEngine:
                 to_id=node_id,
                 edge_type="HAS_PROBLEM",
                 properties={},
+                scope=scope,
                 summary=summary,
             )
             if similar_problem and similar_problem["node_id"] != node_id:
@@ -324,6 +369,7 @@ class GraphUpsertEngine:
                     to_id=similar_problem["node_id"],
                     edge_type="SIMILAR_TO",
                     properties={"similarity_score": similar_problem["similarity_score"]},
+                    scope=scope,
                     summary=summary,
                 )
                 summary.similar_to_edges_written += 1
@@ -350,6 +396,7 @@ class GraphUpsertEngine:
                     to_id=parent_id,
                     edge_type=problem.relationship_to_parent,
                     properties=props,
+                    scope=scope,
                     summary=summary,
                 )
 
@@ -363,17 +410,28 @@ class GraphUpsertEngine:
                     to_id=prev_id,
                     edge_type="PRECEDED_BY",
                     properties={},
+                    scope=scope,
                     summary=summary,
                 )
 
         # --- SOLUTIONS ---
         for solution in solution_output.solutions:
-            node_id = self._create_solution_v2(solution=solution, user_id=user_id, source=session.source)
+            node_id = self._create_solution_v2(
+                solution=solution,
+                user_id=identity,
+                source=session.source,
+                scope=scope,
+                user_email=user_email,
+                contributed_by=contributed_by,
+            )
             label_to_node_id[solution.canonical_label] = node_id
             self._upsert_chroma_document(
                 node_type="Solution",
                 node_id=node_id,
-                user_id=user_id,
+                user_id=identity,
+                scope=scope,
+                user_email=user_email,
+                contributed_by=contributed_by,
                 canonical_label=solution.canonical_label,
                 context_brief=solution.in_depth_summary[:120],
                 document=f"{solution.canonical_label}: {solution.in_depth_summary}".strip(),
@@ -388,6 +446,7 @@ class GraphUpsertEngine:
                     to_id=node_id,
                     edge_type="ATTEMPTED_BY",
                     properties={"attempt_number": solution.attempt_number},
+                    scope=scope,
                     summary=summary,
                 )
                 if solution.outcome == SolutionOutcome.SUCCESS:
@@ -396,6 +455,7 @@ class GraphUpsertEngine:
                         to_id=node_id,
                         edge_type="RESOLVED_BY",
                         properties={},
+                        scope=scope,
                         summary=summary,
                     )
 
@@ -404,6 +464,7 @@ class GraphUpsertEngine:
                 to_id=session.node_id,
                 edge_type="TRIED_IN",
                 properties={},
+                scope=scope,
                 summary=summary,
             )
 
@@ -417,6 +478,7 @@ class GraphUpsertEngine:
                         to_id=parent_sol_id,
                         edge_type="REFINED_BY",
                         properties={},
+                        scope=scope,
                         summary=summary,
                     )
 
@@ -427,6 +489,7 @@ class GraphUpsertEngine:
         *,
         problem: EnrichedProblem,
         user_id: str,
+        scope: str = "user",
         threshold: float = 0.88,
     ) -> dict[str, Any] | None:
         document = f"{problem.canonical_label} - {problem.description}".strip()
@@ -437,7 +500,11 @@ class GraphUpsertEngine:
             result = self.collection.query(
                 query_texts=[document],
                 n_results=3,
-                where={"node_type": "Problem", "user_id": user_id},
+                where=(
+                    {"node_type": "Problem", "scope": "global"}
+                    if scope == "global"
+                    else {"node_type": "Problem", "scope": "user", "user_id": user_id}
+                ),
             )
         except Exception:  # noqa: BLE001
             return None
@@ -453,7 +520,9 @@ class GraphUpsertEngine:
         ):
             if not isinstance(metadata, dict):
                 continue
-            if metadata.get("node_type") != "Problem" or metadata.get("user_id") != user_id:
+            if metadata.get("node_type") != "Problem" or metadata.get("scope") != scope:
+                continue
+            if scope == "user" and metadata.get("user_id") != user_id:
                 continue
             try:
                 similarity_score = round(1.0 - float(distance), 4)
@@ -858,12 +927,23 @@ class GraphUpsertEngine:
             return result
         return None
 
-    def _merge_session(self, *, session: Session, user_id: str) -> str:
+    def _merge_session(
+        self,
+        *,
+        session: Session,
+        user_id: str,
+        scope: str = "user",
+        user_email: str | None = None,
+        contributed_by: str | None = None,
+    ) -> str:
         result = self._run_neo4j(
             """
             // H4:MERGE_SESSION
-            MERGE (s:Session {node_id: $node_id, user_id: $user_id})
+            MERGE (s:Session {node_id: $node_id, scope: $scope})
             SET s.source = $source,
+                s.user_id = $user_id,
+                s.user_email = $user_email,
+                s.contributed_by = $contributed_by,
                 s.conversation_type = $conversation_type,
                 s.resolution_status = $resolution_status,
                 s.title = $title,
@@ -882,6 +962,9 @@ class GraphUpsertEngine:
             """,
             node_id=session.node_id,
             user_id=user_id,
+            scope=scope,
+            user_email=user_email,
+            contributed_by=contributed_by,
             source=session.source.value,
             conversation_type=session.conversation_type.value,
             resolution_status=session.resolution_status.value,
@@ -1022,14 +1105,22 @@ class GraphUpsertEngine:
         document: str,
         parent_problem_id: str | None = None,
         source: SourceType | str | None = None,
+        scope: str = "user",
+        user_email: str | None = None,
+        contributed_by: str | None = None,
     ) -> None:
         metadata = {
             "node_type": node_type,
-            "user_id": user_id,
+            "scope": scope,
             "neo4j_node_id": node_id,
             "canonical_label": canonical_label,
             "context_brief": context_brief,
         }
+        if scope == "user":
+            metadata["user_id"] = user_id
+            metadata["user_email"] = user_email or user_id
+        if scope == "global" and contributed_by:
+            metadata["contributed_by"] = contributed_by
         if source is not None:
             metadata["source"] = _source_value(source)
         if parent_problem_id:

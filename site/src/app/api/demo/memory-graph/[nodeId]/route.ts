@@ -12,14 +12,20 @@ type RouteContext = {
   }>;
 };
 
-export async function GET(_request: Request, context: RouteContext) {
+function normalizeScope(value: string | null) {
+  return value === "user" || value === "global" || value === "both" ? value : "both";
+}
+
+export async function GET(request: Request, context: RouteContext) {
   const { nodeId } = await context.params;
+  const scope = normalizeScope(new URL(request.url).searchParams.get("scope"));
+
   try {
     const graph = await orangeBackendFetch<BackendGraph>(
-      `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood`,
+      `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood?scope=${scope}`,
     );
     if (graph) {
-      const transformed = transformBackendGraph(graph);
+      const transformed = transformBackendGraph(graph, scope);
       const node = transformed.nodes.find((candidate) => candidate.id === nodeId);
       if (node) {
         return NextResponse.json({

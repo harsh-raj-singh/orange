@@ -15,6 +15,7 @@ type MemoryNode = {
     repo?: string;
     createdAt?: string;
     status?: string;
+    scope?: MemoryScopeValue;
   };
   detailTitle?: string;
   detailBody?: string;
@@ -22,6 +23,9 @@ type MemoryNode = {
   relatedFiles?: string[];
   nextActions?: string[];
 };
+
+type MemoryScopeValue = "user" | "global";
+type MemoryScopeFilter = MemoryScopeValue | "both";
 
 type MemoryEdge = {
   id: string;
@@ -107,6 +111,17 @@ const kindClass: Record<MemoryNode["kind"], string> = {
   Session: "border-[#24352d] bg-[#f6f7f4] text-[#24352d]",
 };
 
+const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
+  { value: "user", label: "My Memory" },
+  { value: "global", label: "Global Knowledge" },
+  { value: "both", label: "Both" },
+];
+
+const scopeNodeClass: Record<MemoryScopeValue, string> = {
+  user: "shadow-[0_16px_38px_rgba(197,85,28,0.16)]",
+  global: "shadow-[0_16px_38px_rgba(85,71,154,0.16)]",
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -121,6 +136,10 @@ function asStringArray(value: unknown) {
 
 function asNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeScope(value: unknown): MemoryScopeValue {
+  return value === "global" || value === "shared" ? "global" : "user";
 }
 
 function clampPosition(value: number, min: number, max: number) {
@@ -158,6 +177,10 @@ function normalizeKind(value: unknown): MemoryNode["kind"] {
   return "Concept";
 }
 
+function nodeScope(node?: MemoryNode): MemoryScopeValue {
+  return node?.metadata?.scope ?? "user";
+}
+
 function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null {
   if (!isRecord(value)) {
     return null;
@@ -189,6 +212,7 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
         repo: asString(value.metadata.repo),
         createdAt: asString(value.metadata.createdAt),
         status: asString(value.metadata.status),
+        scope: normalizeScope(value.metadata.scope),
       }
     : existing?.metadata;
   const detailBody = asString(value.detail) ?? asString(detail?.body) ?? existing?.detailBody;
@@ -254,6 +278,7 @@ export default function MemoryGraph() {
   const [nodes, setNodes] = useState(memoryNodes);
   const [edges, setEdges] = useState<MemoryEdge[]>(fallbackEdges);
   const [selectedId, setSelectedId] = useState("cors");
+  const [scope, setScope] = useState<MemoryScopeFilter>("both");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
@@ -269,6 +294,7 @@ export default function MemoryGraph() {
     [nodes, selectedId],
   );
   const selectedDate = formatDate(selectedNode?.metadata?.createdAt);
+  const selectedScope = nodeScope(selectedNode);
 
   const resolveOverlaps = useCallback((input: MemoryNode[]) => {
     const next = input.map((node) => ({ ...node }));
@@ -295,7 +321,7 @@ export default function MemoryGraph() {
     }
 
     try {
-      const response = await fetch("/api/demo/memory-graph", {
+      const response = await fetch(`/api/demo/memory-graph?scope=${scope}`, {
         cache: "no-store",
       });
 
@@ -326,7 +352,11 @@ export default function MemoryGraph() {
           window.setTimeout(() => setNewNodeIds(new Set()), 500);
         }
 
-        return nextNodes.length > 0 ? resolveOverlaps(nextNodes) : current;
+        const resolvedNodes = nextNodes.length > 0 ? resolveOverlaps(nextNodes) : current;
+        if (!resolvedNodes.some((node) => node.id === selectedId)) {
+          setSelectedId(resolvedNodes[0]?.id ?? "");
+        }
+        return resolvedNodes;
       });
 
       if (Array.isArray(graph.edges)) {
@@ -340,7 +370,7 @@ export default function MemoryGraph() {
         setIsRefreshing(false);
       }
     }
-  }, [resolveOverlaps]);
+  }, [resolveOverlaps, scope, selectedId]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => {
@@ -395,7 +425,7 @@ export default function MemoryGraph() {
     setDetailLoadingId(node.id);
 
     try {
-      const response = await fetch(`/api/demo/memory-graph/${encodeURIComponent(node.id)}`, {
+      const response = await fetch(`/api/demo/memory-graph/${encodeURIComponent(node.id)}?scope=${scope}`, {
         cache: "no-store",
       });
 
@@ -453,6 +483,27 @@ export default function MemoryGraph() {
 
   return (
     <div className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] ${introVisible ? "graph-in-view" : ""}`}>
+      <div className="flex flex-col gap-3 rounded-lg border border-[#24352d]/10 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between lg:col-span-2">
+        <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#5f746b]">
+          Memory scope
+        </p>
+        <div className="grid grid-cols-3 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
+          {scopeOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`h-9 rounded px-3 text-xs font-bold transition ${
+                scope === option.value
+                  ? "bg-white text-[#24352d] shadow-sm"
+                  : "text-[#5f746b] hover:text-[#24352d]"
+              }`}
+              onClick={() => setScope(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div
         ref={graphRef}
         className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#24352d]/10 bg-[#fbfaf5] shadow-[0_24px_70px_rgba(36,53,45,0.12)] touch-none sm:min-h-[500px]"
@@ -547,12 +598,13 @@ export default function MemoryGraph() {
           {nodes.map((node, index) => {
             const isSelected = node.id === selectedNode?.id;
             const isNew = newNodeIds.has(node.id);
+            const currentScope = nodeScope(node);
 
             return (
               <button
                 key={node.id}
                 type="button"
-                className={`memory-node absolute w-[9.75rem] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-3 py-3 text-left shadow-[0_16px_38px_rgba(36,53,45,0.12)] transition-[opacity,transform,box-shadow] duration-500 active:cursor-grabbing ${kindClass[node.kind]} ${
+                className={`memory-node absolute w-[9.75rem] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-3 py-3 text-left transition-[opacity,transform,box-shadow] duration-500 active:cursor-grabbing ${kindClass[node.kind]} ${scopeNodeClass[currentScope]} ${
                   isSelected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-[calc(50%+2px)]"
                 } ${isNew ? "scale-0 opacity-0" : "scale-100 opacity-100"}`}
                 style={{ left: `${node.x}%`, top: `${node.y}%`, animationDelay: `${index * 200}ms` }}
@@ -580,6 +632,13 @@ export default function MemoryGraph() {
                 <span className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em]">
                   {node.kind}
                 </span>
+                <span
+                  className={`ml-2 rounded-full px-1.5 py-0.5 font-mono text-[0.58rem] font-semibold uppercase tracking-[0.1em] ${
+                    currentScope === "global" ? "bg-[#f5f2ff] text-[#55479a]" : "bg-[#fff8ec] text-[#8f3b14]"
+                  }`}
+                >
+                  {currentScope === "global" ? "Shared" : "Private"}
+                </span>
                 <span className="mt-1 block text-sm font-semibold leading-5">{node.label}</span>
               </button>
             );
@@ -606,8 +665,20 @@ export default function MemoryGraph() {
               {Math.round(selectedNode.score * 100)}%
             </span>
           ) : null}
+          <span
+            className={`rounded-full px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] ${
+              selectedScope === "global" ? "bg-[#f5f2ff] text-[#55479a]" : "bg-[#fff8ec] text-[#8f3b14]"
+            }`}
+          >
+            {selectedScope === "global" ? "Shared" : "Private"}
+          </span>
         </div>
         <p className="mt-5 text-sm leading-6 text-[#536057]">{selectedNode?.summary}</p>
+        {selectedScope === "global" ? (
+          <p className="mt-3 rounded-md border border-[#6f61b5]/15 bg-[#f5f2ff] px-3 py-2 text-sm leading-6 text-[#55479a]">
+            Contributed anonymously from shared sessions
+          </p>
+        ) : null}
         <div className="mt-5 rounded-md bg-[#f7f3e8] p-4 text-sm leading-6 text-[#3f4b44]">
           {detailLoadingId === selectedNode?.id ? (
             <span className="text-[#6b746e]">Loading node context...</span>
@@ -622,7 +693,7 @@ export default function MemoryGraph() {
         </div>
         {selectedNode?.metadata || selectedDate ? (
           <dl className="mt-5 grid gap-3 text-sm text-[#536057]">
-            {selectedNode.metadata?.owner ? (
+            {selectedScope !== "global" && selectedNode.metadata?.owner ? (
               <div>
                 <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Owner</dt>
                 <dd className="mt-1 text-[#24352d]">{selectedNode.metadata.owner}</dd>

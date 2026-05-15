@@ -18,6 +18,8 @@ export type BackendGraph = {
   edges?: BackendEdge[];
 };
 
+type MemoryScope = "user" | "global" | "both";
+
 function asString(value: unknown) {
   return typeof value === "string" ? value : undefined;
 }
@@ -50,7 +52,24 @@ function nodeTypeFor(label?: string): DemoMemoryNodeType {
   return "Concept";
 }
 
-export function transformBackendGraph(graph: BackendGraph) {
+function scopeFor(properties: Record<string, unknown>, fallback: MemoryScope) {
+  const rawScope =
+    asString(properties.scope) ??
+    asString(properties.visibility) ??
+    asString(properties.memory_scope);
+
+  if (rawScope === "global" || rawScope === "shared") {
+    return "global";
+  }
+
+  if (rawScope === "user" || rawScope === "private") {
+    return "user";
+  }
+
+  return fallback === "global" ? "global" : "user";
+}
+
+export function transformBackendGraph(graph: BackendGraph, requestedScope: MemoryScope = "both") {
   const nodes = (graph.nodes ?? [])
     .map((node): DemoMemoryNode | null => {
       const id = asString(node.id);
@@ -59,6 +78,7 @@ export function transformBackendGraph(graph: BackendGraph) {
       }
       const properties = node.properties ?? {};
       const nodeType = nodeTypeFor(asString(node.label));
+      const scope = scopeFor(properties, requestedScope);
       const label =
         asString(properties.canonical_label) ??
         asString(properties.title) ??
@@ -85,10 +105,19 @@ export function transformBackendGraph(graph: BackendGraph) {
             asString(properties.ingested_at) ??
             new Date().toISOString(),
           status: statusFor(nodeType),
-        },
+          scope,
+        } as DemoMemoryNode["metadata"] & { scope: Exclude<MemoryScope, "both"> },
       } satisfies DemoMemoryNode;
     })
-    .filter((node): node is DemoMemoryNode => Boolean(node));
+    .filter((node): node is DemoMemoryNode => Boolean(node))
+    .filter((node) => {
+      if (requestedScope === "both") {
+        return true;
+      }
+
+      return (node.metadata as DemoMemoryNode["metadata"] & { scope?: MemoryScope }).scope === requestedScope;
+    });
+  const visibleNodeIds = new Set(nodes.map((node) => node.id));
 
   const edges: DemoMemoryEdge[] = (graph.edges ?? [])
     .map((edge, index) => {
@@ -106,7 +135,8 @@ export function transformBackendGraph(graph: BackendGraph) {
         strength: asNumber(edge.properties?.similarity_score) ?? 0.78,
       } satisfies DemoMemoryEdge;
     })
-    .filter((edge): edge is DemoMemoryEdge => Boolean(edge));
+    .filter((edge): edge is DemoMemoryEdge => Boolean(edge))
+    .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
 
   return { nodes, edges };
 }

@@ -32,10 +32,15 @@ export async function POST(request: Request) {
     );
   }
 
+  const completionBody: CompleteDemoConversationInput = {
+    ...body,
+    contribute_to_global: body.contribute_to_global ?? true,
+  };
+
   try {
     const backendResult = await orangeBackendFetch<Record<string, unknown>>("/demo/complete", {
       method: "POST",
-      body,
+      body: completionBody,
     });
 
     if (backendResult) {
@@ -49,7 +54,7 @@ export async function POST(request: Request) {
     console.warn("orange_backend_completion_failed", error);
   }
 
-  const graph = completeDemoConversation(body);
+  const graph = completeDemoConversation(completionBody);
 
   return NextResponse.json({
     ...graph,

@@ -83,3 +83,44 @@ def test_upsert_v2_merges_session_before_edges_and_preserves_source() -> None:
     assert neo4j.sessions[("session-v2", "u1")]["source"] == "cursor"
     assert any(params.get("canonical_label") == "v2 problem" and params.get("source") == "cursor" for _, params in neo4j.query_log)
     assert {upsert["metadatas"][0]["source"] for upsert in chroma.upserts} == {"cursor"}
+
+
+def test_upsert_v2_global_vectors_omit_user_identity_and_audit_contributor() -> None:
+    neo4j = FakeNeo4j()
+    chroma = FakeChroma()
+    session = Session(node_id="session-global", source=SourceType.CURSOR, title="global", summary="summary", message_count=1)
+    issue_output = IssueAgentOutput(
+        session_id="session-global",
+        problems=[
+            EnrichedProblem(
+                segment_id="p1",
+                canonical_label="global problem",
+                description="shared problem details",
+                llm_reasoning="reasoning",
+                first_seen_turn=1,
+                last_seen_turn=1,
+            )
+        ],
+    )
+    solution_output = SolutionAgentOutput(session_id="session-global", solutions=[])
+
+    GraphUpsertEngine(neo4j=neo4j, chroma=chroma, llm=None).upsert_v2(
+        session=session,
+        user_id="u1",
+        user_email="dev@example.com",
+        contributed_by="dev@example.com",
+        scope="global",
+        issue_output=issue_output,
+        solution_output=solution_output,
+    )
+
+    problem_write = next(params for query, params in neo4j.query_log if "MERGE (p:Problem" in query)
+    vector_metadata = chroma.upserts[0]["metadatas"][0]
+
+    assert problem_write["scope"] == "global"
+    assert problem_write["user_id"] is None
+    assert problem_write["contributed_by"] == "dev@example.com"
+    assert vector_metadata["scope"] == "global"
+    assert vector_metadata["contributed_by"] == "dev@example.com"
+    assert "user_id" not in vector_metadata
+    assert "user_email" not in vector_metadata

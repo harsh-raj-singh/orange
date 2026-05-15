@@ -10,7 +10,9 @@ from core.graph_schema_v2 import Problem
 from core.graph_upsert.embeddings import build_problem_embed_string
 from core.graph_upsert.models import MergeDecision
 
-ORANGE_NODE_VECTOR_COLLECTION = "orange_node_vectors"
+ORANGE_USER_VECTOR_COLLECTION = "orange_user_vectors"
+ORANGE_GLOBAL_VECTOR_COLLECTION = "orange_global_vectors"
+ORANGE_NODE_VECTOR_COLLECTION = ORANGE_USER_VECTOR_COLLECTION
 _EMBED_FN = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
 
 ARBITRATION_PROMPT = """You are deciding whether two problem descriptions refer to the same underlying technical problem.
@@ -29,20 +31,40 @@ class _FallbackCollection:
         return {"ids": [[]], "distances": [[]], "metadatas": [[]]}
 
 
-def get_or_create_orange_collection(chroma: Any) -> Any:
-    """Resolve the dedicated H4 collection, creating it on first use when supported."""
+def get_or_create_orange_collection(chroma: Any, *, scope: str = "user") -> Any:
+    """Resolve the dedicated Orange collection, creating it on first use when supported.
+
+    The historical helper name is kept for callers/tests. By default it now
+    resolves the user-scoped collection; pass ``scope="global"`` for shared
+    knowledge.
+    """
 
     if chroma is None:
         return _FallbackCollection()
     if callable(getattr(chroma, "query", None)):
         return chroma
+    collection_name = (
+        ORANGE_GLOBAL_VECTOR_COLLECTION
+        if str(scope or "user").strip().lower() == "global"
+        else ORANGE_USER_VECTOR_COLLECTION
+    )
     if callable(getattr(chroma, "get_or_create_collection", None)):
         return chroma.get_or_create_collection(
-            ORANGE_NODE_VECTOR_COLLECTION,
+            collection_name,
             embedding_function=_EMBED_FN,
             metadata={"hnsw:space": "cosine"},
         )
+    if callable(getattr(chroma, "get_collection", None)):
+        return chroma.get_collection(collection_name)
     return chroma
+
+
+def get_or_create_user_collection(chroma: Any) -> Any:
+    return get_or_create_orange_collection(chroma, scope="user")
+
+
+def get_or_create_global_collection(chroma: Any) -> Any:
+    return get_or_create_orange_collection(chroma, scope="global")
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
@@ -105,6 +127,8 @@ def _filtered_problem_candidates(query_result: dict[str, Any], user_id: str, lim
             continue
         if metadata.get("node_type") != "Problem":
             continue
+        if metadata.get("scope") not in (None, "user"):
+            continue
         if metadata.get("user_id") != user_id:
             continue
         filtered_ids.append(str(candidate_id))
@@ -121,7 +145,7 @@ def _query_problem_candidates(collection: Any, embed_string: str, user_id: str) 
         return collection.query(
             query_texts=[embed_string],
             n_results=3,
-            where={"node_type": "Problem", "user_id": user_id},
+            where={"node_type": "Problem", "scope": "user", "user_id": user_id},
         )
     except Exception:  # noqa: BLE001
         # Some collections may contain older docs missing filter fields.

@@ -117,6 +117,96 @@ def test_ping_context_hydrates_with_neo4j_node_id_metadata(mock_neo4j, mock_chro
     assert resp.matched_nodes[0].node_data["canonical_label"] == "real graph node"
 
 
+def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_neo4j, mock_chroma) -> None:
+    mock_neo4j.problems[("p-user", "u1")] = {
+        "node_id": "p-user",
+        "canonical_label": "shared cors problem",
+        "context_brief": "user-specific details",
+        "status": "open",
+    }
+    mock_neo4j.problems[("p-global", "")] = {
+        "node_id": "p-global",
+        "canonical_label": "shared cors problem",
+        "context_brief": "global details",
+        "status": "open",
+        "contributed_by": "someone@example.com",
+    }
+    mock_chroma.query_returns = [
+        {
+            "ids": [["p-user"]],
+            "distances": [[0.1]],
+            "metadatas": [[
+                {
+                    "scope": "user",
+                    "user_email": "dev@example.com",
+                    "user_id": "u1",
+                    "node_type": "Problem",
+                    "canonical_label": "shared cors problem",
+                }
+            ]],
+        },
+        {
+            "ids": [["p-global"]],
+            "distances": [[0.2]],
+            "metadatas": [[
+                {
+                    "scope": "global",
+                    "node_type": "Problem",
+                    "canonical_label": "shared cors problem",
+                    "contributed_by": "someone@example.com",
+                }
+            ]],
+        },
+    ]
+
+    req = PingContextRequest(
+        query="cors problem",
+        user_id="u1",
+        user_email="dev@example.com",
+        source="cursor",
+        scope="both",
+    )
+    resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+
+    assert len(resp.matched_nodes) == 1
+    assert resp.matched_nodes[0].source == "user"
+    assert resp.matched_nodes[0].also_available_in_global is True
+    assert resp.matched_nodes[0].node_data["global_exists"] is True
+    assert "contributed_by" not in resp.matched_nodes[0].node_data
+    assert mock_chroma.query_calls[0]["where"] == {"scope": "user", "user_email": "dev@example.com"}
+    assert "where" not in mock_chroma.query_calls[1]
+
+
+def test_ping_context_global_scope_hides_contributor_and_uses_global_threshold(mock_neo4j, mock_chroma) -> None:
+    mock_neo4j.problems[("p-global", "")] = {
+        "node_id": "p-global",
+        "canonical_label": "global redis problem",
+        "context_brief": "global details",
+        "status": "open",
+        "contributed_by": "someone@example.com",
+    }
+    mock_chroma.query_returns = {
+        "ids": [["p-global"]],
+        "distances": [[0.27]],
+        "metadatas": [[
+            {
+                "scope": "global",
+                "node_type": "Problem",
+                "canonical_label": "global redis problem",
+                "contributed_by": "someone@example.com",
+            }
+        ]],
+    }
+
+    req = PingContextRequest(query="redis", user_id="u1", source="cursor", min_score=0.95, scope="global")
+    resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+
+    assert len(resp.matched_nodes) == 1
+    assert resp.matched_nodes[0].source == "global"
+    assert "contributed_by" not in resp.matched_nodes[0].node_data
+    assert "where" not in mock_chroma.query_calls[0]
+
+
 def test_ping_context_invalid_source_raises(mock_neo4j, mock_chroma) -> None:
     req = PingContextRequest(query="x", user_id="u1", source="nonexistent_tool")
     with pytest.raises(ValueError, match="source"):

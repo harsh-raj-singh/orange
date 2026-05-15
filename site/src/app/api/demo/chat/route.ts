@@ -7,6 +7,7 @@ const DEFAULT_TIMEOUT_MS = 30000;
 
 type DemoProfile = {
   name?: string;
+  email?: string;
   role?: string;
   company?: string;
   teamProject?: string;
@@ -24,6 +25,7 @@ type DemoChatRequest = {
   model?: string;
   temperature?: number;
   max_tokens?: number;
+  contribute_to_global?: boolean;
 };
 
 type MemoryMatch = {
@@ -31,18 +33,22 @@ type MemoryMatch = {
   label: string;
   node_type: string;
   similarity_score: number;
+  scope?: "user" | "global";
 };
 
 type PingContextResponse = {
   matched_nodes?: Array<{
     node_type?: string;
     similarity_score?: number;
+    source?: string;
+    scope?: string;
     node_data?: {
       canonical_label?: string;
       description?: string;
       in_depth_summary?: string;
       error_code?: string | null;
       tech_stack?: string[];
+      scope?: string;
     };
     neighborhood?: Record<string, unknown>;
   }>;
@@ -59,6 +65,10 @@ type OpenAIChatResponse = {
     message?: string;
   };
 };
+
+function normalizeScope(value: unknown): "user" | "global" {
+  return value === "global" || value === "shared" ? "global" : "user";
+}
 
 function normalizeMessage(message: IncomingMessage) {
   const role = message.role === "assistant" ? "assistant" : "user";
@@ -132,12 +142,14 @@ function buildMemoryContext(memory?: PingContextResponse | null) {
       label,
       node_type: node.node_type ?? "Memory",
       similarity_score: node.similarity_score ?? 0,
+      scope: normalizeScope(node.scope ?? node.source ?? node.node_data?.scope),
     };
   });
 
   const context = nodes
     .map((node, index) => {
       const label = node.node_data?.canonical_label ?? `Memory ${index + 1}`;
+      const scope = normalizeScope(node.scope ?? node.source ?? node.node_data?.scope);
       const description =
         node.node_data?.description ??
         node.node_data?.in_depth_summary ??
@@ -146,7 +158,7 @@ function buildMemoryContext(memory?: PingContextResponse | null) {
         ? `\nNeighborhood: ${JSON.stringify(node.neighborhood).slice(0, 900)}`
         : "";
 
-      return `- ${label} (${node.node_type}, score=${node.similarity_score}): ${description}${neighborhood}`;
+      return `- ${label} (${node.node_type}, ${scope}, score=${node.similarity_score}): ${description}${neighborhood}`;
     })
     .join("\n");
 
@@ -166,6 +178,8 @@ async function fetchMemoryContext(body: DemoChatRequest, latestUserMessage: stri
         query: latestUserMessage,
         source: "cursor",
         min_score: 0.7,
+        contribute_to_global: body.contribute_to_global ?? true,
+        scope: body.contribute_to_global === false ? "user" : "both",
       },
     });
     return buildMemoryContext(memory);

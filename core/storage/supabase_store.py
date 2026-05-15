@@ -19,6 +19,7 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 class StoredSessionIngestion:
     organization_id: str
     user_id: str | None
+    user_email: str | None
     ingestion_id: str
     memory_job_id: str
 
@@ -34,6 +35,11 @@ def _json(value: Any) -> Json:
 
 def _dt(value: datetime | None) -> datetime | None:
     return value
+
+
+def _scope(value: str | None) -> str:
+    cleaned = (value or "user").strip().lower()
+    return cleaned or "user"
 
 
 class OrangePostgresStore:
@@ -173,27 +179,29 @@ class OrangePostgresStore:
         )
 
         user_id: str | None = None
-        if normalized.user_id:
+        if normalized.user_id or normalized.user_email:
             user_id = self.upsert_user(
-                external_user_id=normalized.user_id,
-                display_name=normalized.user_id,
+                external_user_id=normalized.user_id or normalized.user_email or "",
+                email=normalized.user_email,
+                display_name=normalized.user_id or normalized.user_email,
                 metadata=user_metadata or {},
             )
             self.upsert_membership(organization_id=organization_id, user_id=user_id)
 
         payload = normalized.ingestion_metadata()
+        ingestion_scope = _scope(normalized.metadata.get("scope"))
         with self.pool.connection() as conn:
             with conn.transaction():
                 ingestion = conn.execute(
                     """
                     insert into orange.session_ingestions (
-                      organization_id, user_id, source, session_id, external_session_id,
+                      organization_id, user_id, user_email, scope, source, session_id, external_session_id,
                       graph_session_node_id, client_name, client_version, source_url,
                       title, summary, started_at, ended_at, ingested_at, message_count,
                       status, metadata, normalized_payload
                     )
                     values (
-                      %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s, %s, %s, %s,
                       %s, %s, %s, %s,
                       %s, %s, %s, %s, %s, %s,
                       %s, %s, %s
@@ -201,6 +209,8 @@ class OrangePostgresStore:
                     on conflict (organization_id, source, session_id)
                     do update set
                       user_id = excluded.user_id,
+                      user_email = excluded.user_email,
+                      scope = excluded.scope,
                       external_session_id = excluded.external_session_id,
                       graph_session_node_id = excluded.graph_session_node_id,
                       client_name = excluded.client_name,
@@ -220,6 +230,8 @@ class OrangePostgresStore:
                     (
                         organization_id,
                         user_id,
+                        normalized.user_email,
+                        ingestion_scope,
                         normalized.source.value,
                         normalized.session_id,
                         normalized.external_session_id,
@@ -287,6 +299,7 @@ class OrangePostgresStore:
         return StoredSessionIngestion(
             organization_id=organization_id,
             user_id=user_id,
+            user_email=normalized.user_email,
             ingestion_id=ingestion_id,
             memory_job_id=str(job["id"]),
         )

@@ -197,6 +197,7 @@ class SessionIngestionRequest:
     source: str
     session_id: str | None = None
     user_id: str | None = None
+    user_email: str | None = None
     external_session_id: str | None = None
     org_id: str | None = None
     started_at: datetime | str | int | float | None = None
@@ -219,6 +220,7 @@ class NormalizedSession:
     session_id: str
     external_session_id: str
     user_id: str | None
+    user_email: str | None
     org_id: str | None
     started_at: datetime | None
     ended_at: datetime | None
@@ -301,6 +303,8 @@ class NormalizedSession:
         }
         if self.user_id:
             chat["user_id"] = self.user_id
+        if self.user_email:
+            chat["user_email"] = self.user_email
         if self.org_id:
             chat["org_id"] = self.org_id
         return chat
@@ -310,6 +314,7 @@ class NormalizedSession:
             "source": self.source.value,
             "session_id": self.session_id,
             "user_id": self.user_id,
+            "user_email": self.user_email,
             "org_id": self.org_id,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
@@ -392,6 +397,7 @@ def normalize_session_request(request: SessionIngestionRequest | dict[str, Any] 
         session_id=session_id,
         external_session_id=_clean_string(raw.get("external_session_id")) or session_id,
         user_id=_clean_optional_string(raw.get("user_id")),
+        user_email=_clean_optional_string(raw.get("user_email") or raw.get("email")),
         org_id=_clean_optional_string(raw.get("org_id")),
         started_at=_coerce_datetime(raw.get("started_at")),
         ended_at=_coerce_datetime(raw.get("ended_at")),

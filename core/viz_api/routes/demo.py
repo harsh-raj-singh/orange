@@ -17,6 +17,7 @@ router = APIRouter()
 
 class DemoProfile(BaseModel):
     name: str | None = None
+    email: str | None = None
     role: str | None = None
     company: str | None = None
     teamProject: str | None = None
@@ -32,6 +33,7 @@ class DemoCompletePayload(BaseModel):
     messages: list[DemoMessage] = Field(default_factory=list)
     sessionId: str | None = None
     trigger: str | None = None
+    contribute_to_global: bool = True
 
 
 class DemoPingPayload(BaseModel):
@@ -39,11 +41,14 @@ class DemoPingPayload(BaseModel):
     query: str
     source: str = "cursor"
     min_score: float = 0.70
+    scope: str = "both"
 
 
 def _stable_user_id(profile: DemoProfile | None) -> str:
     if not profile:
         return "demo-user"
+    if profile.email:
+        return profile.email.strip().lower()
     raw = "|".join(
         [
             profile.company or "",
@@ -91,13 +96,16 @@ async def complete_conversation(payload: DemoCompletePayload) -> JSONResponse:
         transcript=transcript,
         source="cursor",
         user_id=user_id,
+        user_email=payload.profile.email.strip().lower() if payload.profile and payload.profile.email else None,
         session_id=payload.sessionId or "",
+        contribute_to_global=payload.contribute_to_global,
         participants=[
             {
                 "id": user_id,
                 "name": payload.profile.name if payload.profile else None,
                 "role": payload.profile.role if payload.profile else None,
                 "metadata": {
+                    "email": payload.profile.email if payload.profile else None,
                     "company": payload.profile.company if payload.profile else None,
                     "teamProject": payload.profile.teamProject if payload.profile else None,
                 },
@@ -126,6 +134,8 @@ async def ping_context(payload: DemoPingPayload) -> JSONResponse:
         user_id=user_id,
         source=payload.source,
         min_score=payload.min_score,
+        user_email=payload.profile.email.strip().lower() if payload.profile and payload.profile.email else None,
+        scope=payload.scope,
     )
     try:
         response = await handle_ping_context(req, neo4j=get_neo4j(), chroma=get_chroma())

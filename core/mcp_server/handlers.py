@@ -14,7 +14,11 @@ from core.graph_schema_v2 import (
     validate_edge,
     validate_node,
 )
-from core.graph_upsert.dedup import get_or_create_orange_collection
+from core.graph_upsert.dedup import (
+    get_or_create_global_collection,
+    get_or_create_orange_collection,
+    get_or_create_user_collection,
+)
 from core.graph_upsert.embeddings import build_solution_embed_string
 from core.graph_upsert.writer import content_hash
 from core.mcp_server.models import (
@@ -144,46 +148,43 @@ def _fetch_solution_node(neo4j, node_id: str) -> dict | None:
 async def handle_ping_context(
     req: PingContextRequest, *, neo4j: object, chroma: object
 ) -> PingContextResponse:
-
     query = (req.query or "").strip()
     if not query:
         raise ValueError("query is required")
     user_id = (req.user_id or "").strip()
     if not user_id:
         raise ValueError("user_id is required")
+    user_email = (getattr(req, "user_email", None) or "").strip().lower()
+    scope = (getattr(req, "scope", "both") or "both").strip().lower()
+    if scope not in {"user", "global", "both"}:
+        raise ValueError("scope must be one of: user, global, both")
     _parse_source(req.source)
     min_score = float(getattr(req, "min_score", 0.70))
 
-    collection = get_or_create_orange_collection(chroma)
-
-    # Step 1: Chroma semantic search — top 3, scoped to user
-    try:
-        result = collection.query(
-            query_texts=[query],
-            n_results=3,
-            where={"user_id": user_id},
+    scoped_results: list[tuple[str, dict, float]] = []
+    if scope in {"user", "both"}:
+        scoped_results.extend(
+            _query_user_vectors(
+                chroma=chroma,
+                query=query,
+                user_id=user_id,
+                user_email=user_email,
+                limit=3,
+            )
         )
-    except Exception:
-        raw = collection.query(query_texts=[query], n_results=10)
-        result = _filter_user_hits(raw, user_id=user_id, limit=3)
-
-    ids = (result or {}).get("ids") or [[]]
-    metadatas = (result or {}).get("metadatas") or [[]]
-    distances = (result or {}).get("distances") or [[]]
+    if scope in {"global", "both"}:
+        scoped_results.extend(_query_global_vectors(chroma=chroma, query=query, limit=3))
 
     matched_nodes: list[MatchedNode] = []
     node_ids_used: list[str] = []
+    by_label: dict[str, MatchedNode] = {}
 
-    # Step 2: For each Chroma hit, fetch full node + neighborhood from Neo4j
-    for vector_id, metadata, distance in zip(
-        ids[0] if ids else [],
-        metadatas[0] if metadatas else [],
-        distances[0] if distances else [],
-    ):
+    for vector_id, metadata, distance in scoped_results:
         if not vector_id:
             continue
 
         node_type = metadata.get("node_type", "").strip() if isinstance(metadata, dict) else ""
+        vector_scope = str(metadata.get("scope") or "user").strip().lower() if isinstance(metadata, dict) else "user"
         neo4j_node_id = (
             str(metadata.get("neo4j_node_id") or vector_id).strip()
             if isinstance(metadata, dict)
@@ -192,10 +193,10 @@ async def handle_ping_context(
         if not neo4j_node_id:
             continue
         similarity_score = round(1.0 - float(distance), 4) if distance is not None else 0.0
-        if similarity_score < min_score:
+        threshold = 0.72 if vector_scope == "global" else min_score
+        if similarity_score < threshold:
             continue
 
-        # Step 3: Type-aware Neo4j fetch
         if node_type == "Problem":
             row = _fetch_problem_node(neo4j, node_id=neo4j_node_id)
             neighborhood_keys = [
@@ -216,24 +217,43 @@ async def handle_ping_context(
                 "refined_into",
             ]
         else:
-            continue  # skip unknown node types
+            continue
 
         if row is None:
             continue
 
-        # Step 4: Split row into node_data and neighborhood
         neighborhood = {k: row.get(k) for k in neighborhood_keys}
-        node_data = {k: v for k, v in row.items() if k not in neighborhood_keys}
+        node_data = {
+            k: v
+            for k, v in row.items()
+            if k not in neighborhood_keys and not (vector_scope == "global" and k == "contributed_by")
+        }
+        label_key = str(node_data.get("canonical_label") or metadata.get("canonical_label") or "").strip().lower()
+        existing_match = by_label.get(label_key) if label_key else None
+        if existing_match is not None:
+            if existing_match.source == "user" and vector_scope == "global":
+                existing_match.also_available_in_global = True
+                existing_match.node_data["global_exists"] = True
+                continue
+            if existing_match.source == "global" and vector_scope == "user":
+                try:
+                    matched_nodes.remove(existing_match)
+                except ValueError:
+                    pass
+            else:
+                continue
 
         node_ids_used.append(neo4j_node_id)
-        matched_nodes.append(
-            MatchedNode(
-                node_type=node_type,
-                similarity_score=similarity_score,
-                node_data=node_data,
-                neighborhood=neighborhood,
-            )
+        match = MatchedNode(
+            node_type=node_type,
+            similarity_score=similarity_score,
+            node_data=node_data,
+            neighborhood=neighborhood,
+            source="global" if vector_scope == "global" else "user",
         )
+        matched_nodes.append(match)
+        if label_key:
+            by_label[label_key] = match
 
     return PingContextResponse(
         query=query,
@@ -242,7 +262,58 @@ async def handle_ping_context(
     )
 
 
-def _filter_user_hits(raw_result: dict, *, user_id: str, limit: int) -> dict:
+def _query_user_vectors(
+    *,
+    chroma: object,
+    query: str,
+    user_id: str,
+    user_email: str,
+    limit: int,
+) -> list[tuple[str, dict, float]]:
+    collection = get_or_create_user_collection(chroma)
+    identity_filter = {"user_email": user_email} if user_email else {"user_id": user_id}
+    try:
+        result = collection.query(
+            query_texts=[query],
+            n_results=limit,
+            where={"scope": "user", **identity_filter},
+        )
+    except Exception:
+        raw = collection.query(query_texts=[query], n_results=max(10, limit))
+        result = _filter_user_hits(raw, user_id=user_id, user_email=user_email, limit=limit)
+    else:
+        result = _filter_user_hits(result, user_id=user_id, user_email=user_email, limit=limit)
+    return _flatten_chroma_hits(result, default_scope="user")
+
+
+def _query_global_vectors(*, chroma: object, query: str, limit: int) -> list[tuple[str, dict, float]]:
+    collection = get_or_create_global_collection(chroma)
+    try:
+        result = collection.query(query_texts=[query], n_results=limit)
+    except Exception:
+        return []
+    return [
+        (node_id, {**metadata, "scope": "global"}, distance)
+        for node_id, metadata, distance in _flatten_chroma_hits(result, default_scope="global")
+        if metadata.get("scope") in (None, "global")
+    ][:limit]
+
+
+def _flatten_chroma_hits(result: dict, *, default_scope: str) -> list[tuple[str, dict, float]]:
+    ids = (result or {}).get("ids") or [[]]
+    metadatas = (result or {}).get("metadatas") or [[]]
+    distances = (result or {}).get("distances") or [[]]
+
+    hits: list[tuple[str, dict, float]] = []
+    rows = zip(ids[0] if ids else [], metadatas[0] if metadatas else [], distances[0] if distances else [])
+    for node_id, metadata, distance in rows:
+        clean_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        clean_metadata.setdefault("scope", default_scope)
+        hits.append((str(node_id), clean_metadata, float(distance)))
+    return hits
+
+
+def _filter_user_hits(raw_result: dict, *, user_id: str, user_email: str = "", limit: int) -> dict:
     ids = (raw_result or {}).get("ids") or [[]]
     metadatas = (raw_result or {}).get("metadatas") or [[]]
     distances = (raw_result or {}).get("distances") or [[]]
@@ -255,10 +326,19 @@ def _filter_user_hits(raw_result: dict, *, user_id: str, limit: int) -> dict:
     for node_id, metadata, distance in rows:
         if len(out_ids) >= limit:
             break
-        if isinstance(metadata, dict) and metadata.get("user_id") not in (None, user_id):
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if metadata.get("scope") not in (None, "user"):
+            continue
+        metadata_email = str(metadata.get("user_email") or "").strip().lower()
+        metadata_user_id = str(metadata.get("user_id") or "").strip()
+        if user_email and metadata_email:
+            if metadata_email != user_email:
+                continue
+        elif metadata_user_id and metadata_user_id != user_id:
             continue
         out_ids.append(str(node_id))
-        out_meta.append(metadata if isinstance(metadata, dict) else {})
+        out_meta.append(metadata)
         out_dist.append(float(distance))
 
     return {"ids": [out_ids], "metadatas": [out_meta], "distances": [out_dist]}
@@ -286,6 +366,7 @@ async def handle_store_session(
             transcript=transcript,
             source=source.value,
             user_id=req.user_id,
+            user_email=req.user_email,
             session_id=req.session_id,
             external_session_id=req.external_session_id,
             org_id=req.org_id,
@@ -300,9 +381,9 @@ async def handle_store_session(
         )
     )
     session_id = normalized.session_id
-    user_id = normalized.user_id
+    user_id = normalized.user_email or normalized.user_id
     if not user_id:
-        raise ValueError("user_id is required")
+        raise ValueError("user_id or user_email is required")
 
     cache_key = (user_id, session_id, source.value)
     if cache_key in _STORE_SESSION_CACHE:
@@ -328,6 +409,8 @@ async def handle_store_session(
             normalized_session=normalized,
             neo4j_client=neo4j,
             chroma_client=chroma,
+            contribute_to_global=req.contribute_to_global,
+            pii_llm=llm,
         )
     except Exception:
         if (
@@ -494,6 +577,8 @@ async def handle_resolve_problem(
     metadata = {
         "node_type": "Solution",
         "user_id": user_id,
+        "user_email": user_id,
+        "scope": "user",
         "neo4j_node_id": solution_id,
         "canonical_label": canonical_solution_label,
         "context_brief": solution_text,

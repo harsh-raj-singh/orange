@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 type Profile = {
   name: string;
+  email: string;
   role: string;
   company: string;
   teamProject: string;
@@ -21,6 +22,7 @@ type MemoryReference = {
   label: string;
   node_type: string;
   similarity_score: number;
+  scope?: string;
 };
 
 type CompletionTrigger = "user_done" | "pagehide";
@@ -36,6 +38,7 @@ type ChatResponse = {
 
 const emptyProfile: Profile = {
   name: "",
+  email: "",
   role: "",
   company: "",
   teamProject: "",
@@ -45,9 +48,11 @@ const profileFields: ReadonlyArray<{
   id: keyof Profile;
   label: string;
   placeholder: string;
+  type?: string;
   multiline?: boolean;
 }> = [
   { id: "name", label: "Name", placeholder: "Avery Chen" },
+  { id: "email", label: "Email", placeholder: "avery@acme.com", type: "email" },
   { id: "role", label: "Role", placeholder: "Staff engineer" },
   { id: "company", label: "Company", placeholder: "Acme Cloud" },
   { id: "teamProject", label: "Team or project", placeholder: "Platform reliability" },
@@ -88,8 +93,29 @@ function parseServerEventBlock(block: string) {
   }
 }
 
+function memoryScopeFor(memoryNode: MemoryReference) {
+  const scope = memoryNode.scope?.toLowerCase();
+
+  if (scope === "global" || scope === "shared") {
+    return "shared";
+  }
+
+  return "private";
+}
+
+function memoryChipLabel(memoryNode: MemoryReference) {
+  return memoryScopeFor(memoryNode) === "shared" ? "From shared knowledge" : "From your sessions";
+}
+
+function memoryChipClass(memoryNode: MemoryReference) {
+  return memoryScopeFor(memoryNode) === "shared"
+    ? "border-[#6f61b5]/25 bg-[#f5f2ff] text-[#55479a] hover:border-[#6f61b5]"
+    : "border-[#c5551c]/20 bg-[#fff8ec] text-[#8f3b14] hover:border-[#c5551c]";
+}
+
 export default function TestChat() {
   const [profile, setProfile] = useState<Profile>(emptyProfile);
+  const [contributeToGlobal, setContributeToGlobal] = useState(true);
   const [isProfileSubmitted, setIsProfileSubmitted] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -105,6 +131,7 @@ export default function TestChat() {
     sessionId,
     lastSavedCount,
     isProfileSubmitted,
+    contributeToGlobal,
   });
 
   const isProfileReady = useMemo(
@@ -120,8 +147,9 @@ export default function TestChat() {
       sessionId,
       lastSavedCount,
       isProfileSubmitted,
+      contributeToGlobal,
     };
-  }, [isProfileSubmitted, lastSavedCount, messages, profile, sessionId]);
+  }, [contributeToGlobal, isProfileSubmitted, lastSavedCount, messages, profile, sessionId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -140,6 +168,7 @@ export default function TestChat() {
         messages: state.messages,
         sessionId: state.sessionId,
         trigger,
+        contribute_to_global: state.contributeToGlobal,
       };
       const body = JSON.stringify(payload);
 
@@ -235,6 +264,7 @@ export default function TestChat() {
           profile,
           messages: nextMessages,
           sessionId,
+          contribute_to_global: contributeToGlobal,
         }),
       });
 
@@ -368,6 +398,7 @@ export default function TestChat() {
               <span className="text-sm font-semibold text-[#24352d]">{field.label}</span>
               <input
                 id={`orange-${field.id}`}
+                type={field.type ?? "text"}
                 className="mt-2 h-11 w-full rounded-md border border-[#d8ded7] bg-[#fbfaf5] px-3 text-sm text-[#182019] outline-none transition placeholder:text-[#8b968f] focus:border-[#c5551c] focus:ring-2 focus:ring-[#c5551c]/18"
                 placeholder={field.placeholder}
                 value={profile[field.id]}
@@ -376,6 +407,23 @@ export default function TestChat() {
               />
             </label>
           ))}
+
+          <label className="flex gap-3 rounded-md border border-[#d8ded7] bg-[#fbfaf5] p-3 md:col-span-2">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 rounded border-[#9aa79d] text-[#c5551c] focus:ring-[#c5551c]"
+              checked={contributeToGlobal}
+              onChange={(event) => setContributeToGlobal(event.target.checked)}
+            />
+            <span>
+              <span className="block text-sm font-semibold text-[#24352d]">
+                Share technical knowledge with global knowledge base
+              </span>
+              <span className="mt-1 block text-xs text-[#5f746b]">
+                (Personal details are never shared)
+              </span>
+            </span>
+          </label>
 
           <div className="flex flex-col gap-3 border-t border-[#24352d]/10 pt-4 md:col-span-2 sm:flex-row sm:items-center sm:justify-between">
             <p aria-live="polite" className="min-h-5 text-sm text-[#9f4218]">
@@ -426,6 +474,12 @@ export default function TestChat() {
               <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Company</dt>
               <dd className="mt-1 font-semibold text-[#24352d]">{profile.company}</dd>
             </div>
+            <div>
+              <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Sharing</dt>
+              <dd className="mt-1 font-semibold text-[#24352d]">
+                {contributeToGlobal ? "Shared knowledge on" : "Private session only"}
+              </dd>
+            </div>
           </dl>
         </aside>
 
@@ -458,12 +512,12 @@ export default function TestChat() {
                         </span>
                         {message.memory.map((memoryNode) => (
                           <a
-                            className="rounded-full border border-[#c5551c]/20 bg-[#fff8ec] px-2 py-1 text-xs font-semibold text-[#8f3b14] transition hover:border-[#c5551c]"
+                            className={`rounded-full border px-2 py-1 text-xs font-semibold transition ${memoryChipClass(memoryNode)}`}
                             href="#graph"
                             key={memoryNode.id}
                             title={`${memoryNode.node_type} · score ${memoryNode.similarity_score}`}
                           >
-                            {memoryNode.label}
+                            {memoryChipLabel(memoryNode)} · {memoryNode.label}
                           </a>
                         ))}
                       </div>

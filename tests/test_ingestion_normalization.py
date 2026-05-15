@@ -8,6 +8,7 @@ def test_normalizes_messages_into_turn_transcript_and_metadata() -> None:
         SessionIngestionRequest(
             source="claude",
             user_id="dev_123",
+            user_email="dev@example.com",
             session_id="abc",
             external_session_id="claude-session-abc",
             org_id="org_1",
@@ -37,6 +38,7 @@ def test_normalizes_messages_into_turn_transcript_and_metadata() -> None:
     assert normalized.session_node_id == "session_abc"
     assert normalized.source.value == "claude"
     assert normalized.user_id == "dev_123"
+    assert normalized.user_email == "dev@example.com"
     assert normalized.org_id == "org_1"
     assert normalized.participant_ids == ["dev_123", "assistant"]
     assert normalized.transcript == (
@@ -46,6 +48,7 @@ def test_normalizes_messages_into_turn_transcript_and_metadata() -> None:
     assert normalized.client_name == "claude-code"
     assert normalized.client_version == "2.1.0"
     assert normalized.source_url == "claude://session/abc"
+    assert normalized.ingestion_metadata()["user_email"] == "dev@example.com"
 
 
 def test_normalizes_simple_transcript_and_generates_stable_identity() -> None:
