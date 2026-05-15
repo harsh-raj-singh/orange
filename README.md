@@ -13,26 +13,6 @@ Orange is a chat-centric memory fabric for debugging and technical conversations
 - Ships a local visualization API for graph and vector inspection
 - Includes Streamlit and Slack entry points for interactive use
 
-## Architecture
-
-```mermaid
-flowchart LR
-    A[Transcript] --> B[Solution Agent]
-    A --> C[Issue Agent]
-    B --> D[Relationship Agent]
-    C --> E[Canonical Labels + Problem Relationships]
-    D --> F[Graph Upsert Engine]
-    E --> F
-    F --> G[(Neo4j)]
-    F --> H[(Chroma)]
-    B --> P[(Supabase Postgres)]
-    C --> P
-    G --> I[MCP Server]
-    H --> I
-    G --> J[Viz API]
-    H --> J
-```
-
 ## Core Components
 
 ### Extraction Pipeline
