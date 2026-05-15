@@ -8,6 +8,7 @@ Orange is a chat-centric memory fabric for debugging and technical conversations
 - Links solution attempts to the problems they address
 - Tracks follow-up attempts and refinement chains across solutions
 - Stores graph memory in Neo4j and semantic retrieval memory in Chroma
+- Stores users, organizations, raw sessions, messages, and write jobs in Supabase Postgres
 - Exposes retrieval and inspection tools through an MCP server
 - Ships a local visualization API for graph and vector inspection
 - Includes Streamlit and Slack entry points for interactive use
@@ -24,6 +25,8 @@ flowchart LR
     E --> F
     F --> G[(Neo4j)]
     F --> H[(Chroma)]
+    B --> P[(Supabase Postgres)]
+    C --> P
     G --> I[MCP Server]
     H --> I
     G --> J[Viz API]
@@ -40,6 +43,7 @@ flowchart LR
 ### Persistence Layer
 - `core/graph_upsert/writer.py` writes session, problem, and solution nodes plus edges into Neo4j.
 - `core/graph_upsert/dedup.py` manages the shared Chroma collection and embedding setup.
+- `core/storage/supabase_store.py` stores organization, user, normalized session, message, and memory job metadata in Supabase Postgres.
 - `core/graph_schema_v2.py` defines the current graph-facing data model.
 
 ### Query + Inspection Layer
@@ -102,7 +106,22 @@ Fill in the values you need. At minimum, configure:
 
 - `OPENAI_API_KEY`
 - Neo4j connection settings (`MEMGRAPH_URL` or `MEMGRAPH_HOST` + auth)
+- Optional `SUPABASE_DB_URL` or `POSTGRES_DSN` for the Postgres metadata store
 - Optional `CHROMA_PATH` if you do not want the default local path
+
+### Supabase Schema
+
+Orange keeps enterprise/user/session truth out of the graph and vector index. The Supabase migration in `supabase/migrations/` creates a private `orange` schema with:
+
+- `organizations`
+- `users`
+- `organization_members`
+- `source_accounts`
+- `session_ingestions`
+- `session_messages`
+- `memory_write_jobs`
+
+The schema enables RLS and revokes browser-facing `anon`/`authenticated` access. Use server-side database credentials for this path until product-facing policies are intentionally designed.
 
 ## Running the System
 

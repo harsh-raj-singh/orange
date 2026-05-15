@@ -267,6 +267,7 @@ async def handle_store_session(
     neo4j: object,
     chroma: object,
     llm: object | None,
+    postgres_store: object | None = None,
 ) -> StoreSessionResponse:
     transcript = (req.transcript or "").strip()
     if not transcript and not req.messages:
@@ -304,15 +305,54 @@ async def handle_store_session(
     if cache_key in _STORE_SESSION_CACHE:
         return _STORE_SESSION_CACHE[cache_key]
 
-    result = await run_extraction_pipeline(
-        session_id=session_id,
-        user_id=user_id,
-        transcript=normalized.transcript,
-        source=source,
-        normalized_session=normalized,
-        neo4j_client=neo4j,
-        chroma_client=chroma,
-    )
+    stored_ingestion_id: str | None = None
+    if postgres_store is not None and hasattr(postgres_store, "record_normalized_session"):
+        try:
+            stored = postgres_store.record_normalized_session(normalized, status="received")
+            stored_ingestion_id = getattr(stored, "ingestion_id", None)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "postgres_ingestion_record_failed",
+                extra={"session_id": session_id, "user_id": user_id, "error": str(exc)},
+            )
+
+    try:
+        result = await run_extraction_pipeline(
+            session_id=session_id,
+            user_id=user_id,
+            transcript=normalized.transcript,
+            source=source,
+            normalized_session=normalized,
+            neo4j_client=neo4j,
+            chroma_client=chroma,
+        )
+    except Exception:
+        if (
+            postgres_store is not None
+            and stored_ingestion_id
+            and hasattr(postgres_store, "mark_session_status")
+        ):
+            try:
+                postgres_store.mark_session_status(ingestion_id=stored_ingestion_id, status="failed")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "postgres_ingestion_status_failed",
+                    extra={"session_id": session_id, "status": "failed", "error": str(exc)},
+                )
+        raise
+
+    if (
+        postgres_store is not None
+        and stored_ingestion_id
+        and hasattr(postgres_store, "mark_session_status")
+    ):
+        try:
+            postgres_store.mark_session_status(ingestion_id=stored_ingestion_id, status="processed")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "postgres_ingestion_status_failed",
+                extra={"session_id": session_id, "status": "processed", "error": str(exc)},
+            )
 
     response = StoreSessionResponse(
         session_id=session_id,

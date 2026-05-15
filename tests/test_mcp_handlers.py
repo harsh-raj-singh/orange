@@ -147,6 +147,54 @@ def test_store_session_returns_summary(monkeypatch: pytest.MonkeyPatch, mock_neo
     assert calls[0]["source"].value == "cursor"
 
 
+def test_store_session_records_normalized_session_in_postgres(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_neo4j,
+    mock_chroma,
+) -> None:
+    class FakePostgresStore:
+        def __init__(self) -> None:
+            self.recorded = []
+            self.statuses = []
+
+        def record_normalized_session(self, normalized, *, status: str):
+            self.recorded.append((normalized, status))
+            return type("Stored", (), {"ingestion_id": "ing-1"})()
+
+        def mark_session_status(self, *, ingestion_id: str, status: str) -> None:
+            self.statuses.append((ingestion_id, status))
+
+    async def fake_run_extraction_pipeline(**kwargs) -> dict:
+        return {"problems_created": 0, "problems_merged": 0, "solutions_written": 0}
+
+    monkeypatch.setattr("core.mcp_server.handlers.run_extraction_pipeline", fake_run_extraction_pipeline)
+
+    store = FakePostgresStore()
+    req = StoreSessionRequest(
+        source="cursor",
+        user_id="u1",
+        session_id="sess-postgres",
+        org_id="org-1",
+        messages=[{"role": "user", "content": "store this normalized session"}],
+    )
+
+    resp = asyncio.run(
+        handle_store_session(
+            req,
+            neo4j=mock_neo4j,
+            chroma=mock_chroma,
+            llm=None,
+            postgres_store=store,
+        )
+    )
+
+    assert resp.session_id == "sess-postgres"
+    assert store.recorded[0][0].org_id == "org-1"
+    assert store.recorded[0][0].message_count == 1
+    assert store.recorded[0][1] == "received"
+    assert store.statuses == [("ing-1", "processed")]
+
+
 def test_store_session_idempotent(monkeypatch: pytest.MonkeyPatch, mock_neo4j, mock_chroma) -> None:
     calls = {"count": 0}
 
