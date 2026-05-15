@@ -18,7 +18,6 @@ export type DemoMemoryNode = {
     company?: string;
     team?: string;
     project?: string;
-    currentChallenge?: string;
     timestamp?: string;
     date?: string;
     sessionId?: string;

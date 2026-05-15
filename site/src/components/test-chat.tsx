@@ -7,7 +7,6 @@ type Profile = {
   role: string;
   company: string;
   teamProject: string;
-  currentChallenge: string;
 };
 
 type ChatMessage = {
@@ -30,7 +29,6 @@ const emptyProfile: Profile = {
   role: "",
   company: "",
   teamProject: "",
-  currentChallenge: "",
 };
 
 const profileFields: ReadonlyArray<{
@@ -43,12 +41,6 @@ const profileFields: ReadonlyArray<{
   { id: "role", label: "Role", placeholder: "Staff engineer" },
   { id: "company", label: "Company", placeholder: "Acme Cloud" },
   { id: "teamProject", label: "Team or project", placeholder: "Platform reliability" },
-  {
-    id: "currentChallenge",
-    label: "Current challenge",
-    placeholder: "Reducing flaky deploy rollbacks",
-    multiline: true,
-  },
 ];
 
 function createId(prefix: string) {
@@ -214,7 +206,8 @@ export default function TestChat() {
       });
 
       if (!response.ok) {
-        throw new Error("Chat request failed.");
+        const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(errorBody?.error ?? "Chat request failed.");
       }
 
       const data = (await response.json()) as ChatResponse;
@@ -229,9 +222,13 @@ export default function TestChat() {
       }
 
       setMessages((current) => [...current, assistantMessage]);
-    } catch {
+    } catch (error) {
       setMessages(nextMessages);
-      setError("Orange could not reach the demo chat endpoint. Try again in a moment.");
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Orange could not reach the demo chat endpoint. Try again in a moment.",
+      );
     } finally {
       setIsSending(false);
     }
@@ -265,31 +262,16 @@ export default function TestChat() {
 
         <form className="grid gap-4 md:grid-cols-2" onSubmit={submitProfile}>
           {profileFields.map((field) => (
-            <label
-              className={field.multiline ? "md:col-span-2" : undefined}
-              htmlFor={`orange-${field.id}`}
-              key={field.id}
-            >
+            <label htmlFor={`orange-${field.id}`} key={field.id}>
               <span className="text-sm font-semibold text-[#24352d]">{field.label}</span>
-              {field.multiline ? (
-                <textarea
-                  id={`orange-${field.id}`}
-                  className="mt-2 min-h-28 w-full resize-y rounded-md border border-[#d8ded7] bg-[#fbfaf5] px-3 py-3 text-sm leading-6 text-[#182019] outline-none transition placeholder:text-[#8b968f] focus:border-[#c5551c] focus:ring-2 focus:ring-[#c5551c]/18"
-                  placeholder={field.placeholder}
-                  value={profile[field.id]}
-                  onChange={(event) => updateProfile(field.id, event.target.value)}
-                  required
-                />
-              ) : (
-                <input
-                  id={`orange-${field.id}`}
-                  className="mt-2 h-11 w-full rounded-md border border-[#d8ded7] bg-[#fbfaf5] px-3 text-sm text-[#182019] outline-none transition placeholder:text-[#8b968f] focus:border-[#c5551c] focus:ring-2 focus:ring-[#c5551c]/18"
-                  placeholder={field.placeholder}
-                  value={profile[field.id]}
-                  onChange={(event) => updateProfile(field.id, event.target.value)}
-                  required
-                />
-              )}
+              <input
+                id={`orange-${field.id}`}
+                className="mt-2 h-11 w-full rounded-md border border-[#d8ded7] bg-[#fbfaf5] px-3 text-sm text-[#182019] outline-none transition placeholder:text-[#8b968f] focus:border-[#c5551c] focus:ring-2 focus:ring-[#c5551c]/18"
+                placeholder={field.placeholder}
+                value={profile[field.id]}
+                onChange={(event) => updateProfile(field.id, event.target.value)}
+                required
+              />
             </label>
           ))}
 
@@ -341,10 +323,6 @@ export default function TestChat() {
             <div>
               <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Company</dt>
               <dd className="mt-1 font-semibold text-[#24352d]">{profile.company}</dd>
-            </div>
-            <div>
-              <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Challenge</dt>
-              <dd className="mt-1 leading-6 text-[#536057]">{profile.currentChallenge}</dd>
             </div>
           </dl>
         </aside>

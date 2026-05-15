@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 const NVIDIA_CHAT_COMPLETIONS_URL =
   "https://integrate.api.nvidia.com/v1/chat/completions";
 const DEFAULT_NVIDIA_MODEL = "deepseek-ai/deepseek-v4-pro";
+const DEFAULT_TIMEOUT_MS = 30000;
 
 type DemoProfile = {
   name?: string;
   role?: string;
   company?: string;
   teamProject?: string;
-  currentChallenge?: string;
 };
 
 type IncomingMessage = {
@@ -53,13 +53,12 @@ function createSystemPrompt(profile?: DemoProfile) {
   const role = profile?.role?.trim() || "developer";
   const company = profile?.company?.trim() || "their company";
   const teamProject = profile?.teamProject?.trim() || "their current project";
-  const currentChallenge = profile?.currentChallenge?.trim() || "the task they are exploring";
 
   return [
     "You are Orange, a concise developer memory fabric demo.",
     "Help the user reason through engineering work in a way that would create useful future memory.",
     "Prefer concrete causes, decisions, failed attempts, next actions, and file or system surfaces when the user gives them.",
-    `User metadata: name=${name}; role=${role}; company=${company}; team_or_project=${teamProject}; current_challenge=${currentChallenge}.`,
+    `User metadata: name=${name}; role=${role}; company=${company}; team_or_project=${teamProject}.`,
   ].join("\n");
 }
 
@@ -106,28 +105,51 @@ export async function POST(request: Request) {
     );
   }
 
-  const upstreamResponse = await fetch(NVIDIA_CHAT_COMPLETIONS_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: body.model ?? DEFAULT_NVIDIA_MODEL,
-      messages: [
-        {
-          role: "system",
-          content: createSystemPrompt(body.profile),
-        },
-        ...messages,
-      ],
-      temperature: body.temperature ?? 1,
-      top_p: 0.95,
-      max_tokens: body.max_tokens ?? 2048,
-      chat_template_kwargs: { thinking: false },
-      stream: false,
-    }),
-  });
+  const timeoutMs = Number(process.env.NVIDIA_CHAT_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let upstreamResponse: Response;
+
+  try {
+    upstreamResponse = await fetch(NVIDIA_CHAT_COMPLETIONS_URL, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.NVIDIA_CHAT_MODEL ?? body.model ?? DEFAULT_NVIDIA_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: createSystemPrompt(body.profile),
+          },
+          ...messages,
+        ],
+        temperature: body.temperature ?? 0.7,
+        top_p: 0.95,
+        max_tokens: body.max_tokens ?? 512,
+        chat_template_kwargs: { thinking: false },
+        stream: false,
+      }),
+    });
+  } catch (error) {
+    const isAbort =
+      error instanceof Error &&
+      (error.name === "AbortError" || error.message.toLowerCase().includes("aborted"));
+
+    return NextResponse.json(
+      {
+        error: isAbort
+          ? "NVIDIA chat timed out. The API key is valid, but the chat completion endpoint did not respond quickly enough."
+          : "NVIDIA chat request failed before a response was returned.",
+      },
+      { status: isAbort ? 504 : 502 },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const responseText = await upstreamResponse.text();
   let responseBody: unknown = responseText;

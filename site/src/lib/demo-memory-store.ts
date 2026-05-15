@@ -20,7 +20,6 @@ export type DemoConversationProfile = {
   team?: string;
   project?: string;
   teamProject?: string;
-  currentChallenge?: string;
 };
 
 export type CompleteDemoConversationInput = {
@@ -185,7 +184,6 @@ function createMetadata(input: CompleteDemoConversationInput, createdAt: string)
     company: input.profile?.company,
     team: input.profile?.team ?? input.profile?.teamProject,
     project: input.profile?.project ?? input.profile?.teamProject,
-    currentChallenge: input.profile?.currentChallenge,
     timestamp: createdAt,
     date: createdAt.slice(0, 10),
     sessionId: input.sessionId,
