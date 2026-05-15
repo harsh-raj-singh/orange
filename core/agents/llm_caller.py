@@ -85,15 +85,23 @@ async def call_llm_json(system_prompt: str, user_content: str) -> dict:
         t0 = time.time()
         try:
             print(f"[LLM] attempt={attempt} sending request...", flush=True)
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
+            request = {
+                "model": model,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
-                temperature=0.3,
-                max_tokens=4096,
-            )
+                "temperature": 0.3,
+                "max_tokens": 4096,
+            }
+            try:
+                response = await client.chat.completions.create(**request)
+            except Exception as exc:  # noqa: BLE001
+                if "max_tokens" not in str(exc) or "max_completion_tokens" not in str(exc):
+                    raise
+                request.pop("max_tokens", None)
+                request["max_completion_tokens"] = 4096
+                response = await client.chat.completions.create(**request)
 
             if not response.choices:
                 raise ValueError("LLM returned no choices.")

@@ -1,21 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 
 import pytest
 
-from core.agents.concept_extractor import ConceptDraft, ConceptExtractionResult
-from core.agents.debug_extractor import DebugExtractionResult, ResolutionStatus
-from core.agents.runner import ExtractionResult
-from core.graph_schema_v2 import (
-    ConceptCategory,
-    ProblemExtractionOutput,
-    ProblemSeverity,
-    ProblemStatus,
-    SolutionDraft,
-    SourceType,
-)
 from core.mcp_server.handlers import (
     _STORE_SESSION_CACHE,
     handle_ping_context,
@@ -27,7 +15,6 @@ from core.mcp_server.models import (
     ResolveProblemRequest,
     StoreSessionRequest,
 )
-from core.source_registry import ConversationType
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +90,33 @@ def test_ping_context_respects_token_budget(mock_neo4j, mock_chroma) -> None:
     assert len(resp.node_ids_used) > 0
 
 
+def test_ping_context_hydrates_with_neo4j_node_id_metadata(mock_neo4j, mock_chroma) -> None:
+    mock_neo4j.problems[("p-real", "u1")] = {
+        "node_id": "p-real",
+        "canonical_label": "real graph node",
+        "context_brief": "stored under neo4j id, not vector id",
+        "status": "open",
+    }
+    mock_chroma.query_returns = {
+        "ids": [["problem_p-real"]],
+        "distances": [[0.1]],
+        "metadatas": [[
+            {
+                "user_id": "u1",
+                "node_type": "Problem",
+                "neo4j_node_id": "p-real",
+                "canonical_label": "real graph node",
+            }
+        ]],
+    }
+
+    req = PingContextRequest(query="graph id", user_id="u1", source="cursor")
+    resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+
+    assert resp.node_ids_used == ["p-real"]
+    assert resp.matched_nodes[0].node_data["canonical_label"] == "real graph node"
+
+
 def test_ping_context_invalid_source_raises(mock_neo4j, mock_chroma) -> None:
     req = PingContextRequest(query="x", user_id="u1", source="nonexistent_tool")
     with pytest.raises(ValueError, match="source"):
@@ -110,48 +124,13 @@ def test_ping_context_invalid_source_raises(mock_neo4j, mock_chroma) -> None:
 
 
 def test_store_session_returns_summary(monkeypatch: pytest.MonkeyPatch, mock_neo4j, mock_chroma) -> None:
-    async def fake_run_extraction(session_id: str, transcript: str, source: SourceType) -> ExtractionResult:
-        debug_result = DebugExtractionResult(
-            problems=[
-                ProblemExtractionOutput(
-                    canonical_label="fastapi cors middleware order",
-                    context_brief="middleware after route include",
-                    concepts=["cors", "fastapi"],
-                    severity=ProblemSeverity.HIGH,
-                    status=ProblemStatus.RESOLVED,
-                    solutions=[
-                        SolutionDraft(
-                            canonical_label="move corsmiddleware before include_router",
-                            description="move corsmiddleware before include_router",
-                            tried=True,
-                            worked=True,
-                        )
-                    ],
-                )
-            ],
-            session_resolution_status=ResolutionStatus.RESOLVED,
-        )
-        concept_result = ConceptExtractionResult(
-            concepts=[
-                ConceptDraft(
-                    canonical_label="fastapi",
-                    category=ConceptCategory.FRAMEWORK,
-                    parent_concept=None,
-                )
-            ]
-        )
-        return ExtractionResult(
-            session_id=session_id,
-            source=source,
-            conversation_type=ConversationType.DEBUGGING,
-            classifier_confidence=0.92,
-            debug_result=debug_result,
-            brainstorm_result=None,
-            concept_result=concept_result,
-            extraction_timestamp=datetime.now(timezone.utc),
-        )
+    calls: list[dict] = []
 
-    monkeypatch.setattr("core.mcp_server.handlers.run_extraction", fake_run_extraction)
+    async def fake_run_extraction_pipeline(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {"problems_created": 1, "problems_merged": 0, "solutions_written": 1}
+
+    monkeypatch.setattr("core.mcp_server.handlers.run_extraction_pipeline", fake_run_extraction_pipeline)
 
     req = StoreSessionRequest(
         transcript="we had a cors problem and fixed it by moving middleware",
@@ -162,39 +141,20 @@ def test_store_session_returns_summary(monkeypatch: pytest.MonkeyPatch, mock_neo
     resp = asyncio.run(handle_store_session(req, neo4j=mock_neo4j, chroma=mock_chroma, llm=None))
 
     assert resp.session_id == "sess-abc"
-    assert isinstance(resp.problems_created, int)
-    assert isinstance(resp.problems_merged, int)
+    assert resp.problems_created == 1
+    assert resp.problems_merged == 0
+    assert resp.solutions_written == 1
+    assert calls[0]["source"].value == "cursor"
 
 
 def test_store_session_idempotent(monkeypatch: pytest.MonkeyPatch, mock_neo4j, mock_chroma) -> None:
     calls = {"count": 0}
 
-    async def fake_run_extraction(session_id: str, transcript: str, source: SourceType) -> ExtractionResult:
+    async def fake_run_extraction_pipeline(**kwargs) -> dict:
         calls["count"] += 1
-        debug_result = DebugExtractionResult(
-            problems=[
-                ProblemExtractionOutput(
-                    canonical_label="fastapi cors middleware order",
-                    context_brief="middleware after route include",
-                    concepts=["cors", "fastapi"],
-                    severity=ProblemSeverity.HIGH,
-                    status=ProblemStatus.RESOLVED,
-                )
-            ],
-            session_resolution_status=ResolutionStatus.RESOLVED,
-        )
-        return ExtractionResult(
-            session_id=session_id,
-            source=source,
-            conversation_type=ConversationType.DEBUGGING,
-            classifier_confidence=0.8,
-            debug_result=debug_result,
-            brainstorm_result=None,
-            concept_result=ConceptExtractionResult(concepts=[]),
-            extraction_timestamp=datetime.now(timezone.utc),
-        )
+        return {"problems_created": 1, "problems_merged": 0, "solutions_written": 0}
 
-    monkeypatch.setattr("core.mcp_server.handlers.run_extraction", fake_run_extraction)
+    monkeypatch.setattr("core.mcp_server.handlers.run_extraction_pipeline", fake_run_extraction_pipeline)
 
     req = StoreSessionRequest(transcript="...", source="cursor", user_id="u1", session_id="sess-xyz")
     resp1 = asyncio.run(handle_store_session(req, neo4j=mock_neo4j, chroma=mock_chroma, llm=None))

@@ -40,6 +40,18 @@ class SourceConfig:
 
 
 SOURCE_REGISTRY: dict[SourceType, SourceConfig] = {
+    SourceType.MCP: SourceConfig(
+        source_id=SourceType.MCP,
+        expected_conversation_types=(
+            ConversationType.DEBUGGING,
+            ConversationType.QA,
+            ConversationType.DECISION,
+        ),
+        realtime_ping_enabled=True,
+        has_resolve_callback=True,
+        retrieval_context_token_budget=1800,
+        extraction_agents=("DebugExtractionAgent", "ConceptExtractionAgent"),
+    ),
     SourceType.CURSOR: SourceConfig(
         source_id=SourceType.CURSOR,
         expected_conversation_types=(
@@ -50,6 +62,19 @@ SOURCE_REGISTRY: dict[SourceType, SourceConfig] = {
         has_resolve_callback=True,
         retrieval_context_token_budget=2000,
         extraction_agents=("DebugExtractionAgent", "ConceptExtractionAgent"),
+    ),
+    SourceType.CLAUDE: SourceConfig(
+        source_id=SourceType.CLAUDE,
+        expected_conversation_types=(
+            ConversationType.DEBUGGING,
+            ConversationType.BRAINSTORM,
+            ConversationType.QA,
+            ConversationType.DECISION,
+        ),
+        realtime_ping_enabled=True,
+        has_resolve_callback=True,
+        retrieval_context_token_budget=1800,
+        extraction_agents=("DebugExtractionAgent", "BrainstormExtractionAgent", "ConceptExtractionAgent"),
     ),
     SourceType.SLACK: SourceConfig(
         source_id=SourceType.SLACK,
@@ -96,4 +121,3 @@ def get_source_config(source: SourceType) -> SourceConfig:
     if source not in SOURCE_REGISTRY:
         raise ValueError(f"Unknown source: {source!r}. Register it in SOURCE_REGISTRY first.")
     return SOURCE_REGISTRY[source]
-

@@ -12,6 +12,7 @@ from typing import Any
 
 from core.agents.issue_agent.runner import run_issue_agent
 from core.agents.solution_agent.runner import run_solution_agent
+from core.ingestion import NormalizedSession, SessionIngestionRequest, normalize_ingestion_request
 from core.graph_upsert.writer import GraphUpsertEngine
 from core.graph_schema_v2 import Session, SourceType
 
@@ -25,6 +26,8 @@ async def run_extraction_pipeline(
     transcript: str,
     neo4j_client: Any,
     chroma_client: Any,
+    source: SourceType | str = SourceType.CURSOR,
+    normalized_session: NormalizedSession | None = None,
 ) -> dict:
     """
     Main pipeline. Call this when a chat is marked complete.
@@ -41,8 +44,19 @@ async def run_extraction_pipeline(
     """
 
     errors = []
+    normalized = normalized_session or normalize_ingestion_request(
+        SessionIngestionRequest(
+            transcript=transcript,
+            source=source.value if isinstance(source, SourceType) else str(source),
+            user_id=user_id,
+            session_id=session_id,
+        )
+    )
+    transcript = normalized.transcript
 
     # Step 1 - Solution Agent
+    session_id = normalized.session_id
+
     solution_output = await run_solution_agent(session_id, transcript)
 
     # Step 2 - Issue Agent (needs solution_output for context stitching)
@@ -59,8 +73,20 @@ async def run_extraction_pipeline(
 
     # Step 3 - Build Session node (fetch or create)
     session = Session(
-        node_id=f"session_{session_id}",
-        source=SourceType.STREAMLIT,
+        node_id=normalized.session_node_id,
+        source=normalized.source,
+        started_at=normalized.started_at,
+        ended_at=normalized.ended_at,
+        message_count=normalized.message_count,
+        title=normalized.title,
+        summary=normalized.transcript[:500],
+        external_session_id=normalized.external_session_id,
+        org_id=normalized.org_id,
+        participants=normalized.participant_ids,
+        client_name=normalized.client_name,
+        client_version=normalized.client_version,
+        source_url=normalized.source_url,
+        ingested_at=normalized.ingested_at,
     )
 
     # Step 4 - Write to Neo4j

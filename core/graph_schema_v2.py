@@ -32,7 +32,9 @@ class NodeType(str, Enum):
 
 
 class SourceType(str, Enum):
+    MCP = "mcp"
     CURSOR = "cursor"
+    CLAUDE = "claude"
     SLACK = "slack"
     GMAIL = "gmail"
     STREAMLIT = "streamlit"
@@ -183,6 +185,34 @@ class Session(NodeBase):
         default=0,
         ge=0,
         description="Count of messages observed in the session transcript.",
+    )
+    external_session_id: str | None = Field(
+        default=None,
+        description="Original session/thread/conversation id from the source system.",
+    )
+    org_id: str | None = Field(
+        default=None,
+        description="Tenant or organization id when available.",
+    )
+    participants: list[str] = Field(
+        default_factory=list,
+        description="Stable participant ids or names observed in the source session.",
+    )
+    client_name: str | None = Field(
+        default=None,
+        description="Calling client or agentic system name, e.g. claude-code or cursor.",
+    )
+    client_version: str | None = Field(
+        default=None,
+        description="Optional calling client version.",
+    )
+    source_url: str | None = Field(
+        default=None,
+        description="Optional URL or locator for the original source session.",
+    )
+    ingested_at: datetime = Field(
+        default_factory=_utc_now,
+        description="UTC timestamp when Orange ingested the session.",
     )
 
     @field_validator("ended_at")

@@ -126,8 +126,42 @@ async def ping_context(query: str, user_id: str, source: str) -> dict:
 
 
 @_APP.tool()
-async def store_session(transcript: str, source: str, user_id: str, session_id: str) -> dict:
-    req = StoreSessionRequest(transcript=transcript, source=source, user_id=user_id, session_id=session_id)
+async def store_session(
+    transcript: str,
+    source: str,
+    user_id: str = "",
+    session_id: str = "",
+    org_id: str | None = None,
+    external_session_id: str | None = None,
+    started_at: str | None = None,
+    ended_at: str | None = None,
+    participants: list[dict[str, Any]] | None = None,
+    client_name: str | None = None,
+    client_version: str | None = None,
+    source_url: str | None = None,
+    client_metadata: dict[str, Any] | None = None,
+    tool_metadata: dict[str, Any] | None = None,
+    messages: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict:
+    req = StoreSessionRequest(
+        transcript=transcript,
+        source=source,
+        user_id=user_id,
+        session_id=session_id,
+        external_session_id=external_session_id,
+        org_id=org_id,
+        started_at=started_at,
+        ended_at=ended_at,
+        participants=participants or [],
+        client_name=client_name,
+        client_version=client_version,
+        source_url=source_url,
+        client_metadata=client_metadata or {},
+        tool_metadata=tool_metadata or {},
+        messages=messages or [],
+        metadata=metadata or {},
+    )
     resp = await handle_store_session(req, neo4j=get_neo4j(), chroma=get_chroma(), llm=get_llm())
     return asdict(resp)
 

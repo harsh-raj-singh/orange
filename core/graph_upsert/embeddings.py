@@ -6,7 +6,7 @@ from core.graph_schema_v2 import Concept, Problem, Solution
 def build_problem_embed_string(problem: Problem) -> str:
     """Use canonical label plus contextual clause to avoid short-label collisions."""
 
-    return f"{problem.canonical_label} - {problem.context_brief}".strip()
+    return f"{problem.canonical_label} - {problem.description}".strip()
 
 
 def build_solution_embed_string(solution: Solution) -> str:

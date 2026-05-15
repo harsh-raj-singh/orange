@@ -163,10 +163,10 @@ def run_dedup(problem: Problem, user_id: str, chroma: Any, llm: Any = None) -> M
         )
 
     existing_label = str(top_metadata.get("canonical_label", "")).strip()
-    existing_context = str(top_metadata.get("context_brief", "")).strip()
+    existing_context = str(top_metadata.get("context_brief") or top_metadata.get("description") or "").strip()
     prompt = ARBITRATION_PROMPT.format(
         new_label=problem.canonical_label,
-        new_context=problem.context_brief,
+        new_context=problem.description,
         existing_label=existing_label,
         existing_context=existing_context,
     )

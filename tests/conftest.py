@@ -162,6 +162,87 @@ class FakeNeo4j:
                 self.problems[key]["status"] = "resolved"
             return FakeResult(None)
 
+        if "MATCH (p:Problem {node_id: $node_id})" in query:
+            node_id = str(params["node_id"])
+            for (problem_id, _uid), payload in self.problems.items():
+                if problem_id != node_id:
+                    continue
+                attempted = [
+                    {
+                        "canonical_label": solution.get("canonical_label"),
+                        "description": solution.get("description"),
+                        "in_depth_summary": solution.get("in_depth_summary"),
+                        "outcome": solution.get("outcome"),
+                        "failure_reason": solution.get("failure_reason"),
+                        "steps": solution.get("steps", []),
+                        "code_snippets": solution.get("code_snippets", []),
+                        "attempt_number": solution.get("attempt_number"),
+                    }
+                    for edge_type, src, dst, uid in self.edges
+                    for (_, _, sol_uid), solution in self.solutions.items()
+                    if edge_type == "ATTEMPTED_BY" and src == node_id and solution.get("node_id") == dst and sol_uid == uid
+                ]
+                resolved_by = next(
+                    (
+                        solution.get("canonical_label")
+                        for edge_type, src, dst, uid in self.edges
+                        for (_, _, sol_uid), solution in self.solutions.items()
+                        if edge_type == "RESOLVED_BY" and src == node_id and solution.get("node_id") == dst and sol_uid == uid
+                    ),
+                    None,
+                )
+                return FakeResult(
+                    {
+                        "canonical_label": payload.get("canonical_label"),
+                        "description": payload.get("description") or payload.get("context_brief", ""),
+                        "error_code": payload.get("error_code"),
+                        "error_type": payload.get("error_type"),
+                        "stack_trace_summary": payload.get("stack_trace_summary"),
+                        "tech_stack": payload.get("tech_stack", []),
+                        "affected_file_paths": payload.get("affected_file_paths", []),
+                        "relevant_code": payload.get("relevant_code", []),
+                        "prior_solution_contexts": payload.get("prior_solution_contexts", []),
+                        "depth": payload.get("depth", 0),
+                        "recurrence_count": payload.get("recurrence_count", 0),
+                        "first_seen_turn": payload.get("first_seen_turn"),
+                        "last_seen_turn": payload.get("last_seen_turn"),
+                        "attempted_solutions": attempted,
+                        "resolved_by": resolved_by,
+                        "caused_by_parent": None,
+                        "child_problems": [],
+                        "related_problems": [],
+                    }
+                )
+            return FakeResult(None)
+
+        if "MATCH (s:Solution {node_id: $node_id})" in query:
+            node_id = str(params["node_id"])
+            for (label, parent_problem_id, _uid), payload in self.solutions.items():
+                if payload.get("node_id") != node_id:
+                    continue
+                problem = self.problems.get((parent_problem_id, _uid), {})
+                return FakeResult(
+                    {
+                        "canonical_label": payload.get("canonical_label", label),
+                        "description": payload.get("description", ""),
+                        "in_depth_summary": payload.get("in_depth_summary", ""),
+                        "outcome": payload.get("outcome"),
+                        "failure_reason": payload.get("failure_reason"),
+                        "failure_error_code": payload.get("failure_error_code"),
+                        "steps": payload.get("steps", []),
+                        "code_snippets": payload.get("code_snippets", []),
+                        "tools_used": payload.get("tools_used", []),
+                        "attempt_number": payload.get("attempt_number"),
+                        "addresses_problem": problem.get("canonical_label"),
+                        "problem_description": problem.get("description") or problem.get("context_brief"),
+                        "problem_error_code": problem.get("error_code"),
+                        "problem_tech_stack": problem.get("tech_stack", []),
+                        "refined_from": None,
+                        "refined_into": [],
+                    }
+                )
+            return FakeResult(None)
+
         if "H6:GET_NODE_WITH_NEIGHBORS" in query:
             node_id = str(params["node_id"])
             user_id = params["user_id"]
