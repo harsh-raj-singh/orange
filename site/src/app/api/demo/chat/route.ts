@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 
-const NVIDIA_CHAT_COMPLETIONS_URL =
-  "https://integrate.api.nvidia.com/v1/chat/completions";
-const DEFAULT_NVIDIA_MODEL = "deepseek-ai/deepseek-v4-pro";
+const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
 const DEFAULT_TIMEOUT_MS = 30000;
 
 type DemoProfile = {
@@ -26,7 +25,7 @@ type DemoChatRequest = {
   max_tokens?: number;
 };
 
-type NvidiaChatResponse = {
+type OpenAIChatResponse = {
   choices?: Array<{
     message?: {
       content?: unknown;
@@ -62,14 +61,38 @@ function createSystemPrompt(profile?: DemoProfile) {
   ].join("\n");
 }
 
+function buildOpenAIRequestBody(body: DemoChatRequest, messages: Array<{ role: "user" | "assistant"; content: string }>) {
+  const model = process.env.OPENAI_CHAT_MODEL ?? body.model ?? DEFAULT_OPENAI_MODEL;
+  const tokenLimit = body.max_tokens ?? 512;
+  const requestBody: Record<string, unknown> = {
+    model,
+    messages: [
+      {
+        role: "system",
+        content: createSystemPrompt(body.profile),
+      },
+      ...messages,
+    ],
+  };
+
+  if (model.startsWith("gpt-5")) {
+    requestBody.max_completion_tokens = tokenLimit;
+  } else {
+    requestBody.max_tokens = tokenLimit;
+    requestBody.temperature = body.temperature ?? 0.7;
+  }
+
+  return requestBody;
+}
+
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const apiKey = process.env.NVIDIA_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
     return NextResponse.json(
-      { error: "NVIDIA_API_KEY is not configured on the server." },
+      { error: "OPENAI_API_KEY is not configured on the server." },
       { status: 503 },
     );
   }
@@ -105,34 +128,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const timeoutMs = Number(process.env.NVIDIA_CHAT_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
+  const timeoutMs = Number(process.env.OPENAI_CHAT_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let upstreamResponse: Response;
 
   try {
-    upstreamResponse = await fetch(NVIDIA_CHAT_COMPLETIONS_URL, {
+    upstreamResponse = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: "POST",
       signal: controller.signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: process.env.NVIDIA_CHAT_MODEL ?? body.model ?? DEFAULT_NVIDIA_MODEL,
-        messages: [
-          {
-            role: "system",
-            content: createSystemPrompt(body.profile),
-          },
-          ...messages,
-        ],
-        temperature: body.temperature ?? 0.7,
-        top_p: 0.95,
-        max_tokens: body.max_tokens ?? 512,
-        chat_template_kwargs: { thinking: false },
-        stream: false,
-      }),
+      body: JSON.stringify(buildOpenAIRequestBody(body, messages)),
     });
   } catch (error) {
     const isAbort =
@@ -142,8 +151,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: isAbort
-          ? "NVIDIA chat timed out. The API key is valid, but the chat completion endpoint did not respond quickly enough."
-          : "NVIDIA chat request failed before a response was returned.",
+          ? "OpenAI chat timed out before returning a response."
+          : "OpenAI chat request failed before a response was returned.",
       },
       { status: isAbort ? 504 : 502 },
     );
@@ -167,15 +176,15 @@ export async function POST(request: Request) {
           typeof responseBody === "object" &&
           responseBody !== null &&
           "error" in responseBody &&
-          typeof (responseBody as NvidiaChatResponse).error?.message === "string"
-            ? (responseBody as NvidiaChatResponse).error?.message
-            : "NVIDIA chat request failed.",
+          typeof (responseBody as OpenAIChatResponse).error?.message === "string"
+            ? (responseBody as OpenAIChatResponse).error?.message
+            : "OpenAI chat request failed.",
       },
       { status: upstreamResponse.status },
     );
   }
 
-  const parsed = responseBody as NvidiaChatResponse;
+  const parsed = responseBody as OpenAIChatResponse;
   const message = parsed.choices?.[0]?.message?.content;
 
   return NextResponse.json({
