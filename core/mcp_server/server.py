@@ -34,6 +34,8 @@ _APP = FastMCP("orange")
 _NEO4J_CLIENT: Any | None = None
 _CHROMA_CLIENT: Any | None = None
 _LLM_CLIENT: Any | None = None
+_POSTGRES_STORE: Any | None = None
+_POSTGRES_DISABLED = False
 
 
 class OpenAILLMAdapter:
@@ -102,6 +104,28 @@ def get_chroma() -> Any:
     return _CHROMA_CLIENT
 
 
+def get_postgres_store() -> Any | None:
+    global _POSTGRES_STORE, _POSTGRES_DISABLED
+    if _POSTGRES_STORE is not None:
+        return _POSTGRES_STORE
+    if _POSTGRES_DISABLED:
+        return None
+
+    dsn = os.getenv("SUPABASE_DB_URL") or os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        _POSTGRES_DISABLED = True
+        return None
+
+    try:
+        from core.storage import OrangePostgresStore
+
+        _POSTGRES_STORE = OrangePostgresStore(dsn)
+    except Exception:
+        _POSTGRES_DISABLED = True
+        return None
+    return _POSTGRES_STORE
+
+
 def get_llm() -> Any:
     global _LLM_CLIENT
     if _LLM_CLIENT is not None:
@@ -126,9 +150,49 @@ async def ping_context(query: str, user_id: str, source: str) -> dict:
 
 
 @_APP.tool()
-async def store_session(transcript: str, source: str, user_id: str, session_id: str) -> dict:
-    req = StoreSessionRequest(transcript=transcript, source=source, user_id=user_id, session_id=session_id)
-    resp = await handle_store_session(req, neo4j=get_neo4j(), chroma=get_chroma(), llm=get_llm())
+async def store_session(
+    transcript: str,
+    source: str,
+    user_id: str = "",
+    session_id: str = "",
+    org_id: str | None = None,
+    external_session_id: str | None = None,
+    started_at: str | None = None,
+    ended_at: str | None = None,
+    participants: list[dict[str, Any]] | None = None,
+    client_name: str | None = None,
+    client_version: str | None = None,
+    source_url: str | None = None,
+    client_metadata: dict[str, Any] | None = None,
+    tool_metadata: dict[str, Any] | None = None,
+    messages: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict:
+    req = StoreSessionRequest(
+        transcript=transcript,
+        source=source,
+        user_id=user_id,
+        session_id=session_id,
+        external_session_id=external_session_id,
+        org_id=org_id,
+        started_at=started_at,
+        ended_at=ended_at,
+        participants=participants or [],
+        client_name=client_name,
+        client_version=client_version,
+        source_url=source_url,
+        client_metadata=client_metadata or {},
+        tool_metadata=tool_metadata or {},
+        messages=messages or [],
+        metadata=metadata or {},
+    )
+    resp = await handle_store_session(
+        req,
+        neo4j=get_neo4j(),
+        chroma=get_chroma(),
+        llm=get_llm(),
+        postgres_store=get_postgres_store(),
+    )
     return asdict(resp)
 
 

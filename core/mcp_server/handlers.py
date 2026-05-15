@@ -3,13 +3,16 @@ from __future__ import annotations
 import logging
 
 from core.agents.orchestrator import run_extraction_pipeline
+from core.ingestion import SessionIngestionRequest, normalize_ingestion_request
 from core.graph_schema_v2 import (
+    ConfidenceLevel,
     Problem,
-    ProblemStatus,
+    ResolvedByEdge,
     Solution,
+    SolutionOutcome,
+    SourceType,
     validate_edge,
     validate_node,
-    ResolvedByEdge,
 )
 from core.graph_upsert.dedup import get_or_create_orange_collection
 from core.graph_upsert.embeddings import build_solution_embed_string
@@ -23,12 +26,13 @@ from core.mcp_server.models import (
     StoreSessionRequest,
     StoreSessionResponse,
 )
+from core.source_registry import get_source_config
 
 logger = logging.getLogger(__name__)
 
 # H6: For now store_session is implemented synchronously (no background queue)
 # to keep deterministic behavior in tests. Production can switch to async queueing.
-_STORE_SESSION_CACHE: dict[tuple[str, str], StoreSessionResponse] = {}
+_STORE_SESSION_CACHE: dict[tuple[str, str, str], StoreSessionResponse] = {}
 
 
 def _run_neo4j(neo4j: object, query: str, **params):
@@ -51,11 +55,13 @@ def _single_record(result) -> dict | None:
     return None
 
 
-def _safe_problem_status(value: str | None) -> ProblemStatus:
+def _parse_source(value: str) -> SourceType:
     try:
-        return ProblemStatus(str(value or "").lower())
-    except ValueError:
-        return ProblemStatus.OPEN
+        source = SourceType(str(value or "").strip().lower())
+    except ValueError as exc:
+        raise ValueError(f"source is invalid: {value!r}") from exc
+    get_source_config(source)
+    return source
 
 
 def _fetch_problem_node(neo4j, node_id: str) -> dict | None:
@@ -145,6 +151,8 @@ async def handle_ping_context(
     user_id = (req.user_id or "").strip()
     if not user_id:
         raise ValueError("user_id is required")
+    _parse_source(req.source)
+    min_score = float(getattr(req, "min_score", 0.70))
 
     collection = get_or_create_orange_collection(chroma)
 
@@ -167,20 +175,29 @@ async def handle_ping_context(
     node_ids_used: list[str] = []
 
     # Step 2: For each Chroma hit, fetch full node + neighborhood from Neo4j
-    for node_id, metadata, distance in zip(
+    for vector_id, metadata, distance in zip(
         ids[0] if ids else [],
         metadatas[0] if metadatas else [],
         distances[0] if distances else [],
     ):
-        if not node_id:
+        if not vector_id:
             continue
 
         node_type = metadata.get("node_type", "").strip() if isinstance(metadata, dict) else ""
+        neo4j_node_id = (
+            str(metadata.get("neo4j_node_id") or vector_id).strip()
+            if isinstance(metadata, dict)
+            else str(vector_id).strip()
+        )
+        if not neo4j_node_id:
+            continue
         similarity_score = round(1.0 - float(distance), 4) if distance is not None else 0.0
+        if similarity_score < min_score:
+            continue
 
         # Step 3: Type-aware Neo4j fetch
         if node_type == "Problem":
-            row = _fetch_problem_node(neo4j, node_id=node_id)
+            row = _fetch_problem_node(neo4j, node_id=neo4j_node_id)
             neighborhood_keys = [
                 "attempted_solutions",
                 "resolved_by",
@@ -189,7 +206,7 @@ async def handle_ping_context(
                 "related_problems",
             ]
         elif node_type == "Solution":
-            row = _fetch_solution_node(neo4j, node_id=node_id)
+            row = _fetch_solution_node(neo4j, node_id=neo4j_node_id)
             neighborhood_keys = [
                 "addresses_problem",
                 "problem_description",
@@ -208,7 +225,7 @@ async def handle_ping_context(
         neighborhood = {k: row.get(k) for k in neighborhood_keys}
         node_data = {k: v for k, v in row.items() if k not in neighborhood_keys}
 
-        node_ids_used.append(str(node_id))
+        node_ids_used.append(neo4j_node_id)
         matched_nodes.append(
             MatchedNode(
                 node_type=node_type,
@@ -253,34 +270,99 @@ async def handle_store_session(
     neo4j: object,
     chroma: object,
     llm: object | None,
+    postgres_store: object | None = None,
 ) -> StoreSessionResponse:
     transcript = (req.transcript or "").strip()
-    if not transcript:
+    if not transcript and not req.messages:
         raise ValueError("transcript is required")
-    session_id = (req.session_id or "").strip()
-    if not session_id:
-        raise ValueError("session_id is required")
-    user_id = (req.user_id or "").strip()
+    source = _parse_source(req.source)
+    metadata = {
+        **(req.metadata or {}),
+        "client_metadata": req.client_metadata or {},
+        "tool_metadata": req.tool_metadata or {},
+    }
+    normalized = normalize_ingestion_request(
+        SessionIngestionRequest(
+            transcript=transcript,
+            source=source.value,
+            user_id=req.user_id,
+            session_id=req.session_id,
+            external_session_id=req.external_session_id,
+            org_id=req.org_id,
+            started_at=req.started_at,
+            ended_at=req.ended_at,
+            participants=req.participants,
+            messages=req.messages,
+            client_name=req.client_name or str((req.client_metadata or {}).get("name") or "").strip() or None,
+            client_version=req.client_version or str((req.client_metadata or {}).get("version") or "").strip() or None,
+            source_url=req.source_url,
+            metadata=metadata,
+        )
+    )
+    session_id = normalized.session_id
+    user_id = normalized.user_id
     if not user_id:
         raise ValueError("user_id is required")
 
-    cache_key = (user_id, session_id)
+    cache_key = (user_id, session_id, source.value)
     if cache_key in _STORE_SESSION_CACHE:
         return _STORE_SESSION_CACHE[cache_key]
 
-    result = await run_extraction_pipeline(
-        session_id=session_id,
-        user_id=user_id,
-        transcript=transcript,
-        neo4j_client=neo4j,
-        chroma_client=chroma,
-    )
+    stored_ingestion_id: str | None = None
+    if postgres_store is not None and hasattr(postgres_store, "record_normalized_session"):
+        try:
+            stored = postgres_store.record_normalized_session(normalized, status="received")
+            stored_ingestion_id = getattr(stored, "ingestion_id", None)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "postgres_ingestion_record_failed",
+                extra={"session_id": session_id, "user_id": user_id, "error": str(exc)},
+            )
+
+    try:
+        result = await run_extraction_pipeline(
+            session_id=session_id,
+            user_id=user_id,
+            transcript=normalized.transcript,
+            source=source,
+            normalized_session=normalized,
+            neo4j_client=neo4j,
+            chroma_client=chroma,
+        )
+    except Exception:
+        if (
+            postgres_store is not None
+            and stored_ingestion_id
+            and hasattr(postgres_store, "mark_session_status")
+        ):
+            try:
+                postgres_store.mark_session_status(ingestion_id=stored_ingestion_id, status="failed")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "postgres_ingestion_status_failed",
+                    extra={"session_id": session_id, "status": "failed", "error": str(exc)},
+                )
+        raise
+
+    if (
+        postgres_store is not None
+        and stored_ingestion_id
+        and hasattr(postgres_store, "mark_session_status")
+    ):
+        try:
+            postgres_store.mark_session_status(ingestion_id=stored_ingestion_id, status="processed")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "postgres_ingestion_status_failed",
+                extra={"session_id": session_id, "status": "processed", "error": str(exc)},
+            )
 
     response = StoreSessionResponse(
         session_id=session_id,
         problems_created=result.get("problems_created", 0),
         problems_merged=result.get("problems_merged", 0),
         solutions_written=result.get("solutions_written", 0),
+        errors=list(result.get("errors") or []),
     )
     _STORE_SESSION_CACHE[cache_key] = response
     return response
@@ -332,8 +414,7 @@ async def handle_resolve_problem(
     problem_node = Problem(
         node_id=problem_id,
         canonical_label=str(problem_row.get("canonical_label") or label),
-        context_brief=str(problem_row.get("context_brief") or ""),
-        status=_safe_problem_status(str(problem_row.get("status") or "open")),
+        description=str(problem_row.get("context_brief") or ""),
     )
     validate_node(problem_node)
 
@@ -341,8 +422,9 @@ async def handle_resolve_problem(
     solution_node = Solution(
         canonical_label=canonical_solution_label,
         description=solution_text,
-        tried=True,
-        worked=True,
+        in_depth_summary=solution_text,
+        outcome=SolutionOutcome.SUCCESS,
+        confidence=ConfidenceLevel.HIGH,
     )
     validate_node(solution_node)
 
@@ -356,8 +438,9 @@ async def handle_resolve_problem(
                 MERGE (s:Solution {canonical_label: $canonical_label, parent_problem_id: $problem_id, user_id: $user_id})
                 ON CREATE SET s.node_id = $node_id
                 SET s.description = $description,
-                    s.tried = true,
-                    s.worked = true,
+                    s.in_depth_summary = $description,
+                    s.outcome = 'success',
+                    s.confidence = 'high',
                     s.content_hash = $content_hash,
                     s.status = 'resolved'
                 RETURN s.node_id AS node_id
@@ -377,8 +460,9 @@ async def handle_resolve_problem(
         node_id=solution_id,
         canonical_label=canonical_solution_label,
         description=solution_text,
-        tried=True,
-        worked=True,
+        in_depth_summary=solution_text,
+        outcome=SolutionOutcome.SUCCESS,
+        confidence=ConfidenceLevel.HIGH,
     )
 
     validate_edge(ResolvedByEdge(), problem_node, persisted_solution)

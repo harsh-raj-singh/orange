@@ -25,6 +25,7 @@ from core.graph_schema_v2 import (
     Session,
     Solution,
     SolutionOutcome,
+    SourceType,
     validate_edge,
     validate_node,
 )
@@ -47,6 +48,7 @@ class UpsertSummary:
     solutions_written: int = 0
     cross_session_links_written: int = 0
     related_to_edges_written: int = 0
+    similar_to_edges_written: int = 0
     edges_written: int = 0
     edges_skipped: int = 0
     skipped_by_idempotency: int = 0
@@ -55,6 +57,20 @@ class UpsertSummary:
 def content_hash(node_type: str, session_id: str, canonical_label: str) -> str:
     raw = f"{node_type}:{session_id}:{canonical_label}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _source_value(source: SourceType | str) -> str:
+    return source.value if isinstance(source, SourceType) else str(source)
+
+
+def problem_node_id_for(user_id: str, canonical_label: str) -> str:
+    return f"problem_{hashlib.sha256(f'{user_id}:{canonical_label}'.encode()).hexdigest()[:16]}"
+
+
+def solution_node_id_for(user_id: str, canonical_label: str, attempt_number: int) -> str:
+    return (
+        f"solution_{hashlib.sha256(f'{user_id}:{canonical_label}:{attempt_number}'.encode()).hexdigest()[:16]}"
+    )
 
 
 class GraphUpsertEngine:
@@ -77,7 +93,7 @@ class GraphUpsertEngine:
 
         # Step 1: Session node.
         validate_node(session)
-        self._merge_session(session=session, user_id=user_id)
+        session.node_id = self._merge_session(session=session, user_id=user_id)
         summary.sessions_written += 1
 
         # Step 2: Concept nodes + Concept->Concept hierarchy edges.
@@ -108,15 +124,14 @@ class GraphUpsertEngine:
         *,
         problem: EnrichedProblem,
         user_id: str,
+        source: SourceType | str,
     ) -> str:
         """
         Writes a Problem node with the new v2 schema fields.
         Uses MERGE so re-runs are idempotent on node_id.
         Returns node_id.
         """
-        import hashlib, json as _json
-
-        node_id = f"problem_{hashlib.sha256(f'{user_id}:{problem.canonical_label}'.encode()).hexdigest()[:16]}"
+        node_id = problem_node_id_for(user_id, problem.canonical_label)
 
         self._run_neo4j(
             """
@@ -160,7 +175,7 @@ class GraphUpsertEngine:
             turn_sequence=list(problem.turn_sequence),
             first_seen_turn=problem.first_seen_turn,
             last_seen_turn=problem.last_seen_turn,
-            source="streamlit",
+            source=_source_value(source),
         )
         return node_id
 
@@ -169,16 +184,13 @@ class GraphUpsertEngine:
         *,
         solution: ExtractedSolution,
         user_id: str,
+        source: SourceType | str,
     ) -> str:
         """
         Writes a Solution node with v2 schema fields.
         Returns node_id.
         """
-        import hashlib
-
-        node_id = (
-            f"solution_{hashlib.sha256(f'{user_id}:{solution.canonical_label}:{solution.attempt_number}'.encode()).hexdigest()[:16]}"
-        )
+        node_id = solution_node_id_for(user_id, solution.canonical_label, solution.attempt_number)
 
         self._run_neo4j(
             """
@@ -219,7 +231,7 @@ class GraphUpsertEngine:
             applied_turn=solution.applied_turn,
             turn_sequence=list(solution.turn_sequence),
             confidence=solution.confidence.value,
-            source="streamlit",
+            source=_source_value(source),
         )
         return node_id
 
@@ -279,9 +291,14 @@ class GraphUpsertEngine:
         summary = UpsertSummary()
         label_to_node_id: dict[str, str] = {}
 
+        validate_node(session)
+        self._merge_session(session=session, user_id=user_id)
+        summary.sessions_written += 1
+
         # --- PROBLEMS ---
         for problem in issue_output.problems:
-            node_id = self._create_problem_v2(problem=problem, user_id=user_id)
+            similar_problem = self._find_similar_problem_v2(problem=problem, user_id=user_id)
+            node_id = self._create_problem_v2(problem=problem, user_id=user_id, source=session.source)
             label_to_node_id[problem.canonical_label] = node_id
             self._upsert_chroma_document(
                 node_type="Problem",
@@ -290,6 +307,7 @@ class GraphUpsertEngine:
                 canonical_label=problem.canonical_label,
                 context_brief=problem.description[:120],
                 document=f"{problem.canonical_label} - {problem.description}".strip(),
+                source=session.source,
             )
             summary.problems_created += 1
 
@@ -300,6 +318,15 @@ class GraphUpsertEngine:
                 properties={},
                 summary=summary,
             )
+            if similar_problem and similar_problem["node_id"] != node_id:
+                self._run_edge_direct(
+                    from_id=node_id,
+                    to_id=similar_problem["node_id"],
+                    edge_type="SIMILAR_TO",
+                    properties={"similarity_score": similar_problem["similarity_score"]},
+                    summary=summary,
+                )
+                summary.similar_to_edges_written += 1
 
         for problem in issue_output.problems:
             if not problem.parent_segment_id:
@@ -341,7 +368,7 @@ class GraphUpsertEngine:
 
         # --- SOLUTIONS ---
         for solution in solution_output.solutions:
-            node_id = self._create_solution_v2(solution=solution, user_id=user_id)
+            node_id = self._create_solution_v2(solution=solution, user_id=user_id, source=session.source)
             label_to_node_id[solution.canonical_label] = node_id
             self._upsert_chroma_document(
                 node_type="Solution",
@@ -350,6 +377,7 @@ class GraphUpsertEngine:
                 canonical_label=solution.canonical_label,
                 context_brief=solution.in_depth_summary[:120],
                 document=f"{solution.canonical_label}: {solution.in_depth_summary}".strip(),
+                source=session.source,
             )
             summary.solutions_written += 1
 
@@ -394,6 +422,51 @@ class GraphUpsertEngine:
 
         return summary
 
+    def _find_similar_problem_v2(
+        self,
+        *,
+        problem: EnrichedProblem,
+        user_id: str,
+        threshold: float = 0.88,
+    ) -> dict[str, Any] | None:
+        document = f"{problem.canonical_label} - {problem.description}".strip()
+        if not document:
+            return None
+
+        try:
+            result = self.collection.query(
+                query_texts=[document],
+                n_results=3,
+                where={"node_type": "Problem", "user_id": user_id},
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+        ids = (result or {}).get("ids") or [[]]
+        distances = (result or {}).get("distances") or [[]]
+        metadatas = (result or {}).get("metadatas") or [[]]
+
+        for vector_id, distance, metadata in zip(
+            ids[0] if ids else [],
+            distances[0] if distances else [],
+            metadatas[0] if metadatas else [],
+        ):
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("node_type") != "Problem" or metadata.get("user_id") != user_id:
+                continue
+            try:
+                similarity_score = round(1.0 - float(distance), 4)
+            except Exception:  # noqa: BLE001
+                continue
+            if similarity_score < threshold:
+                continue
+            node_id = str(metadata.get("neo4j_node_id") or vector_id or "").strip()
+            if node_id:
+                return {"node_id": node_id, "similarity_score": similarity_score}
+
+        return None
+
     def _write_concepts(
         self,
         *,
@@ -422,6 +495,7 @@ class GraphUpsertEngine:
                 canonical_label=concept.canonical_label,
                 context_brief="",
                 document=build_concept_embed_string(concept),
+                source=session.source,
             )
 
         for draft in concept_drafts:
@@ -449,6 +523,7 @@ class GraphUpsertEngine:
                     canonical_label=parent.canonical_label,
                     context_brief="",
                     document=build_concept_embed_string(parent),
+                    source=session.source,
                 )
 
             self._write_edge_if_valid(
@@ -534,6 +609,7 @@ class GraphUpsertEngine:
                 canonical_label=problem.canonical_label,
                 context_brief=problem.context_brief,
                 document=build_problem_embed_string(problem),
+                source=session.source,
             )
 
             created_problem = Problem(
@@ -611,6 +687,7 @@ class GraphUpsertEngine:
                     canonical_label=concept.canonical_label,
                     context_brief="",
                     document=build_concept_embed_string(concept),
+                    source=session.source,
                 )
 
             self._write_edge_if_valid(
@@ -682,6 +759,7 @@ class GraphUpsertEngine:
             context_brief=solution.description,
             document=build_solution_embed_string(solution),
             parent_problem_id=parent_problem_id,
+            source=session.source,
         )
 
         persisted_solution = Solution(
@@ -790,7 +868,16 @@ class GraphUpsertEngine:
                 s.resolution_status = $resolution_status,
                 s.title = $title,
                 s.summary = $summary,
-                s.message_count = $message_count
+                s.message_count = $message_count,
+                s.external_session_id = $external_session_id,
+                s.org_id = $org_id,
+                s.participants = $participants,
+                s.client_name = $client_name,
+                s.client_version = $client_version,
+                s.source_url = $source_url,
+                s.started_at = $started_at,
+                s.ended_at = $ended_at,
+                s.ingested_at = $ingested_at
             RETURN s.node_id AS node_id
             """,
             node_id=session.node_id,
@@ -801,6 +888,15 @@ class GraphUpsertEngine:
             title=session.title,
             summary=session.summary,
             message_count=session.message_count,
+            external_session_id=session.external_session_id,
+            org_id=session.org_id,
+            participants=list(session.participants),
+            client_name=session.client_name,
+            client_version=session.client_version,
+            source_url=session.source_url,
+            started_at=session.started_at,
+            ended_at=session.ended_at,
+            ingested_at=session.ingested_at,
         )
         record = self._single_record(result)
         return str((record or {}).get("node_id", session.node_id))
@@ -925,6 +1021,7 @@ class GraphUpsertEngine:
         context_brief: str,
         document: str,
         parent_problem_id: str | None = None,
+        source: SourceType | str | None = None,
     ) -> None:
         metadata = {
             "node_type": node_type,
@@ -933,6 +1030,8 @@ class GraphUpsertEngine:
             "canonical_label": canonical_label,
             "context_brief": context_brief,
         }
+        if source is not None:
+            metadata["source"] = _source_value(source)
         if parent_problem_id:
             metadata["parent_problem_id"] = parent_problem_id
 

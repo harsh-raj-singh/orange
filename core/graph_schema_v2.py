@@ -32,7 +32,9 @@ class NodeType(str, Enum):
 
 
 class SourceType(str, Enum):
+    MCP = "mcp"
     CURSOR = "cursor"
+    CLAUDE = "claude"
     SLACK = "slack"
     GMAIL = "gmail"
     STREAMLIT = "streamlit"
@@ -183,6 +185,34 @@ class Session(NodeBase):
         default=0,
         ge=0,
         description="Count of messages observed in the session transcript.",
+    )
+    external_session_id: str | None = Field(
+        default=None,
+        description="Original session/thread/conversation id from the source system.",
+    )
+    org_id: str | None = Field(
+        default=None,
+        description="Tenant or organization id when available.",
+    )
+    participants: list[str] = Field(
+        default_factory=list,
+        description="Stable participant ids or names observed in the source session.",
+    )
+    client_name: str | None = Field(
+        default=None,
+        description="Calling client or agentic system name, e.g. claude-code or cursor.",
+    )
+    client_version: str | None = Field(
+        default=None,
+        description="Optional calling client version.",
+    )
+    source_url: str | None = Field(
+        default=None,
+        description="Optional URL or locator for the original source session.",
+    )
+    ingested_at: datetime = Field(
+        default_factory=_utc_now,
+        description="UTC timestamp when Orange ingested the session.",
     )
 
     @field_validator("ended_at")
@@ -412,6 +442,7 @@ class EdgeType(str, Enum):
     RECURS_AS = "RECURS_AS"
     TRIED_IN = "TRIED_IN"
     RELATED_TO = "RELATED_TO"
+    SIMILAR_TO = "SIMILAR_TO"
 
     # new
     CAUSED_BY = "CAUSED_BY"  # Problem → Problem (child caused by parent's attempted fix)
@@ -494,6 +525,16 @@ class RelatedToEdge:
 
 
 @dataclass(frozen=True)
+class SimilarToEdge:
+    """Problem -> Problem semantic similarity link."""
+
+    from_node_type: Literal[NodeType.PROBLEM] = NodeType.PROBLEM
+    to_node_type: Literal[NodeType.PROBLEM] = NodeType.PROBLEM
+    edge_type: Literal[EdgeType.SIMILAR_TO] = EdgeType.SIMILAR_TO
+    similarity_score: float | None = None
+
+
+@dataclass(frozen=True)
 class CausedByEdge:
     """Child problem caused by a solution attempt on parent problem."""
 
@@ -548,6 +589,7 @@ EdgeModel = Union[
     RecursAsEdge,
     TriedInEdge,
     RelatedToEdge,
+    SimilarToEdge,
     CausedByEdge,
     TriggeredByEdge,
     AttemptedByEdge,
@@ -585,6 +627,9 @@ _ALLOWED_EDGE_DIRECTIONS: dict[EdgeType, set[tuple[NodeType, NodeType]]] = {
         (NodeType.SOLUTION, NodeType.SESSION),
     },
     EdgeType.RELATED_TO: {
+        (NodeType.PROBLEM, NodeType.PROBLEM),
+    },
+    EdgeType.SIMILAR_TO: {
         (NodeType.PROBLEM, NodeType.PROBLEM),
     },
     EdgeType.CAUSED_BY: {
@@ -644,6 +689,7 @@ def validate_edge(edge: EdgeModel, source_node: BaseModel, target_node: BaseMode
             RecursAsEdge,
             TriedInEdge,
             RelatedToEdge,
+            SimilarToEdge,
             CausedByEdge,
             TriggeredByEdge,
             AttemptedByEdge,

@@ -953,6 +953,7 @@ class ChatCentricMemorySystem:
                                         session_id=chat_id,
                                         user_id=chat["user_id"],
                                         transcript=v2_transcript,
+                                        source=source_for_orange_v2,
                                         neo4j_client=self.graph_driver,
                                         chroma_client=chroma_client,
                                     )

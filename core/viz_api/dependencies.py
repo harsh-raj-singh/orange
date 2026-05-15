@@ -9,6 +9,32 @@ load_dotenv()
 
 _NEO4J_CLIENT: Any | None = None
 _CHROMA_CLIENT: Any | None = None
+_NEO4J_CONSTRAINTS_READY = False
+
+
+def ensure_neo4j_constraints(neo4j: Any) -> None:
+    global _NEO4J_CONSTRAINTS_READY
+    if _NEO4J_CONSTRAINTS_READY:
+        return
+
+    statements = [
+        "CREATE CONSTRAINT orange_problem_node_id IF NOT EXISTS FOR (p:Problem) REQUIRE p.node_id IS UNIQUE",
+        "CREATE CONSTRAINT orange_solution_node_id IF NOT EXISTS FOR (s:Solution) REQUIRE s.node_id IS UNIQUE",
+        "CREATE CONSTRAINT orange_session_node_id IF NOT EXISTS FOR (sess:Session) REQUIRE sess.node_id IS UNIQUE",
+    ]
+    try:
+        if hasattr(neo4j, "run"):
+            for statement in statements:
+                neo4j.run(statement)
+        elif hasattr(neo4j, "session"):
+            with neo4j.session() as session:
+                for statement in statements:
+                    session.run(statement)
+        _NEO4J_CONSTRAINTS_READY = True
+    except Exception:
+        # Some Neo4j-compatible backends do not support constraint DDL. Do not
+        # block the demo API from starting; normal writes can still proceed.
+        _NEO4J_CONSTRAINTS_READY = True
 
 
 def get_neo4j() -> Any:
@@ -18,7 +44,7 @@ def get_neo4j() -> Any:
 
     from neo4j import GraphDatabase
 
-    url = os.getenv("MEMGRAPH_URL") or os.getenv("NEO4J_URL") or os.getenv("MEMGRAPH_BOLT_URL")
+    url = os.getenv("MEMGRAPH_URL") or os.getenv("NEO4J_URL") or os.getenv("NEO4J_URI") or os.getenv("MEMGRAPH_BOLT_URL")
     if not url:
         host = os.getenv("MEMGRAPH_HOST")
         if host:
@@ -37,6 +63,7 @@ def get_neo4j() -> Any:
         _NEO4J_CLIENT = GraphDatabase.driver(url, auth=(username, password))
     else:
         _NEO4J_CLIENT = GraphDatabase.driver(url)
+    ensure_neo4j_constraints(_NEO4J_CLIENT)
     return _NEO4J_CLIENT
 
 
