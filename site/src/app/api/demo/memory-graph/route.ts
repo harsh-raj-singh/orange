@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { getDemoMemoryGraph } from "@/lib/demo-memory-graph";
+import { getDemoMemoryGraphSnapshot } from "@/lib/demo-memory-store";
 
-export const dynamic = "force-static";
+export const dynamic = "force-dynamic";
 
 export function GET() {
-  return NextResponse.json(getDemoMemoryGraph());
+  return NextResponse.json(getDemoMemoryGraphSnapshot());
 }

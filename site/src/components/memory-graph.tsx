@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type MemoryNode = {
   id: string;
@@ -9,7 +9,26 @@ type MemoryNode = {
   x: number;
   y: number;
   summary: string;
-  detail: string;
+  score?: number;
+  metadata?: {
+    owner?: string;
+    repo?: string;
+    createdAt?: string;
+    status?: string;
+  };
+  detailTitle?: string;
+  detailBody?: string;
+  evidence?: string[];
+  relatedFiles?: string[];
+  nextActions?: string[];
+};
+
+type MemoryEdge = {
+  id: string;
+  source: string;
+  target: string;
+  label?: string;
+  strength?: number;
 };
 
 const memoryNodes: MemoryNode[] = [
@@ -20,7 +39,7 @@ const memoryNodes: MemoryNode[] = [
     x: 18,
     y: 28,
     summary: "OPTIONS requests returned 405 after a router refactor.",
-    detail: "Orange keeps the failure mode connected to the final middleware ordering fix, so a later agent can skip repeating origin-list changes.",
+    detailBody: "Orange keeps the failure mode connected to the final middleware ordering fix, so a later agent can skip repeating origin-list changes.",
   },
   {
     id: "middleware",
@@ -29,7 +48,7 @@ const memoryNodes: MemoryNode[] = [
     x: 43,
     y: 18,
     summary: "FastAPI middleware must wrap routes before handlers are mounted.",
-    detail: "This concept links several sessions where registration order changed runtime behavior without changing endpoint code.",
+    detailBody: "This concept links several sessions where registration order changed runtime behavior without changing endpoint code.",
   },
   {
     id: "allowed-origins",
@@ -38,7 +57,7 @@ const memoryNodes: MemoryNode[] = [
     x: 28,
     y: 62,
     summary: "Expanded allowed origins, but preflight still failed.",
-    detail: "A stored failed attempt is useful context because it tells the next engineer which plausible fix already burned time.",
+    detailBody: "A stored failed attempt is useful context because it tells the next engineer which plausible fix already burned time.",
   },
   {
     id: "move-cors",
@@ -47,7 +66,7 @@ const memoryNodes: MemoryNode[] = [
     x: 62,
     y: 48,
     summary: "Register CORSMiddleware before include_router.",
-    detail: "The winning solution is linked to the problem, failed attempt, and code artifact that changed in the final patch.",
+    detailBody: "The winning solution is linked to the problem, failed attempt, and code artifact that changed in the final patch.",
   },
   {
     id: "server-py",
@@ -56,7 +75,7 @@ const memoryNodes: MemoryNode[] = [
     x: 78,
     y: 22,
     summary: "Changed app construction order in the API entrypoint.",
-    detail: "Artifact nodes let Orange return exact files and implementation surfaces instead of only semantic summaries.",
+    detailBody: "Artifact nodes let Orange return exact files and implementation surfaces instead of only semantic summaries.",
   },
   {
     id: "session",
@@ -65,19 +84,19 @@ const memoryNodes: MemoryNode[] = [
     x: 73,
     y: 70,
     summary: "Claude Code trace from reproduction to patch verification.",
-    detail: "Session nodes preserve who participated, when the work happened, and the compact transcript that seeded the graph.",
+    detailBody: "Session nodes preserve who participated, when the work happened, and the compact transcript that seeded the graph.",
   },
 ];
 
-const links = [
-  ["cors", "middleware"],
-  ["cors", "allowed-origins"],
-  ["cors", "move-cors"],
-  ["middleware", "server-py"],
-  ["move-cors", "server-py"],
-  ["move-cors", "session"],
-  ["allowed-origins", "session"],
-] as const;
+const fallbackEdges: MemoryEdge[] = [
+  { id: "cors-middleware", source: "cors", target: "middleware", strength: 0.78 },
+  { id: "cors-allowed-origins", source: "cors", target: "allowed-origins", strength: 0.68 },
+  { id: "cors-move-cors", source: "cors", target: "move-cors", strength: 0.92 },
+  { id: "middleware-server-py", source: "middleware", target: "server-py", strength: 0.72 },
+  { id: "move-cors-server-py", source: "move-cors", target: "server-py", strength: 0.86 },
+  { id: "move-cors-session", source: "move-cors", target: "session", strength: 0.8 },
+  { id: "allowed-origins-session", source: "allowed-origins", target: "session", strength: 0.62 },
+];
 
 const kindClass: Record<MemoryNode["kind"], string> = {
   Problem: "border-[#c5551c] bg-[#fff8ec] text-[#8f3b14]",
@@ -88,9 +107,155 @@ const kindClass: Record<MemoryNode["kind"], string> = {
   Session: "border-[#24352d] bg-[#f6f7f4] text-[#24352d]",
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
+}
+
+function asNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function clampPosition(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function hashNodeId(id: string) {
+  let hash = 0;
+
+  for (let index = 0; index < id.length; index += 1) {
+    hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
+  }
+
+  return hash;
+}
+
+function positionForNode(id: string) {
+  const hash = hashNodeId(id);
+  const angle = ((hash % 360) / 180) * Math.PI;
+  const radius = 0.72 + ((hash >> 8) % 24) / 100;
+
+  return {
+    x: clampPosition(50 + Math.cos(angle) * 34 * radius, 12, 88),
+    y: clampPosition(50 + Math.sin(angle) * 28 * radius, 14, 84),
+  };
+}
+
+function normalizeKind(value: unknown): MemoryNode["kind"] {
+  const kind = asString(value);
+
+  if (kind && kind in kindClass) {
+    return kind as MemoryNode["kind"];
+  }
+
+  return "Concept";
+}
+
+function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = asString(value.id);
+
+  if (!id) {
+    return null;
+  }
+
+  const detail = isRecord(value.detail) ? value.detail : undefined;
+  const coordinates = {
+    x: asNumber(value.x),
+    y: asNumber(value.y),
+  };
+  const position =
+    coordinates.x !== undefined && coordinates.y !== undefined
+      ? {
+          x: clampPosition(coordinates.x, 12, 88),
+          y: clampPosition(coordinates.y, 14, 84),
+        }
+      : existing
+        ? { x: existing.x, y: existing.y }
+        : positionForNode(id);
+  const metadata = isRecord(value.metadata)
+    ? {
+        owner: asString(value.metadata.owner),
+        repo: asString(value.metadata.repo),
+        createdAt: asString(value.metadata.createdAt),
+        status: asString(value.metadata.status),
+      }
+    : existing?.metadata;
+  const detailBody = asString(value.detail) ?? asString(detail?.body) ?? existing?.detailBody;
+
+  return {
+    id,
+    label: asString(value.label) ?? existing?.label ?? "Untitled memory",
+    kind: normalizeKind(value.kind ?? value.type ?? existing?.kind),
+    x: position.x,
+    y: position.y,
+    summary: asString(value.summary) ?? existing?.summary ?? "New memory node waiting for context.",
+    score: asNumber(value.score) ?? existing?.score,
+    metadata,
+    detailTitle: asString(detail?.title) ?? existing?.detailTitle,
+    detailBody,
+    evidence: asStringArray(detail?.evidence) ?? existing?.evidence,
+    relatedFiles: asStringArray(detail?.relatedFiles) ?? existing?.relatedFiles,
+    nextActions: asStringArray(detail?.nextActions) ?? existing?.nextActions,
+  };
+}
+
+function normalizeEdge(value: unknown): MemoryEdge | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const source = asString(value.source) ?? asString(value.from);
+  const target = asString(value.target) ?? asString(value.to);
+
+  if (!source || !target) {
+    return null;
+  }
+
+  return {
+    id: asString(value.id) ?? `${source}-${target}`,
+    source,
+    target,
+    label: asString(value.label),
+    strength: asNumber(value.strength),
+  };
+}
+
+function formatDate(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export default function MemoryGraph() {
   const [nodes, setNodes] = useState(memoryNodes);
+  const [edges, setEdges] = useState<MemoryEdge[]>(fallbackEdges);
   const [selectedId, setSelectedId] = useState("cors");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const graphRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
 
@@ -98,6 +263,102 @@ export default function MemoryGraph() {
     () => nodes.find((node) => node.id === selectedId) ?? nodes[0],
     [nodes, selectedId],
   );
+  const selectedDate = formatDate(selectedNode?.metadata?.createdAt);
+
+  const fetchGraph = useCallback(async (showRefreshing = true) => {
+    if (showRefreshing) {
+      setIsRefreshing(true);
+    }
+
+    try {
+      const response = await fetch("/api/demo/memory-graph", {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Graph request failed: ${response.status}`);
+      }
+
+      const graph: unknown = await response.json();
+
+      if (!isRecord(graph)) {
+        return;
+      }
+
+      setNodes((current) => {
+        const existingById = new Map(current.map((node) => [node.id, node]));
+        const nextNodes = Array.isArray(graph.nodes)
+          ? graph.nodes
+              .map((node) => normalizeNode(node, isRecord(node) ? existingById.get(asString(node.id) ?? "") : undefined))
+              .filter((node): node is MemoryNode => Boolean(node))
+          : [];
+
+        return nextNodes.length > 0 ? nextNodes : current;
+      });
+
+      if (Array.isArray(graph.edges)) {
+        const nextEdges = graph.edges.map(normalizeEdge).filter((edge): edge is MemoryEdge => Boolean(edge));
+        setEdges(nextEdges);
+      }
+    } catch (error) {
+      console.warn("Unable to refresh memory graph", error);
+    } finally {
+      if (showRefreshing) {
+        setIsRefreshing(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialRefresh = window.setTimeout(() => {
+      void fetchGraph(false);
+    }, 0);
+
+    const handleGraphUpdate = () => {
+      void fetchGraph();
+    };
+    const interval = window.setInterval(() => {
+      void fetchGraph();
+    }, 6000);
+
+    window.addEventListener("orange-memory-graph-updated", handleGraphUpdate);
+
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+      window.removeEventListener("orange-memory-graph-updated", handleGraphUpdate);
+    };
+  }, [fetchGraph]);
+
+  async function selectNode(node: MemoryNode) {
+    setSelectedId(node.id);
+
+    if (node.detailBody || detailLoadingId === node.id) {
+      return;
+    }
+
+    setDetailLoadingId(node.id);
+
+    try {
+      const response = await fetch(`/api/demo/memory-graph/${encodeURIComponent(node.id)}`, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Node detail request failed: ${response.status}`);
+      }
+
+      const detail = normalizeNode(await response.json(), node);
+
+      if (detail) {
+        setNodes((current) => current.map((currentNode) => (currentNode.id === node.id ? detail : currentNode)));
+      }
+    } catch (error) {
+      console.warn("Unable to load memory node detail", error);
+    } finally {
+      setDetailLoadingId((current) => (current === node.id ? null : current));
+    }
+  }
 
   function moveNode(clientX: number, clientY: number) {
     const drag = dragRef.current;
@@ -137,9 +398,9 @@ export default function MemoryGraph() {
         }}
       >
         <svg className="absolute inset-0 h-full w-full" role="presentation">
-          {links.map(([from, to]) => {
-            const start = nodes.find((node) => node.id === from);
-            const end = nodes.find((node) => node.id === to);
+          {edges.map((edge) => {
+            const start = nodes.find((node) => node.id === edge.source);
+            const end = nodes.find((node) => node.id === edge.target);
 
             if (!start || !end) {
               return null;
@@ -147,14 +408,14 @@ export default function MemoryGraph() {
 
             return (
               <line
-                key={`${from}-${to}`}
+                key={edge.id}
                 x1={`${start.x}%`}
                 y1={`${start.y}%`}
                 x2={`${end.x}%`}
                 y2={`${end.y}%`}
                 stroke="#9aa79d"
-                strokeOpacity="0.46"
-                strokeWidth="1.5"
+                strokeOpacity={String(0.32 + (edge.strength ?? 0.7) * 0.28)}
+                strokeWidth={String(1 + (edge.strength ?? 0.7))}
               />
             );
           })}
@@ -164,10 +425,13 @@ export default function MemoryGraph() {
           <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#c5551c]">
             Live neighborhood
           </p>
+          <p className="mt-1 text-xs text-[#536057]">
+            {nodes.length} nodes {isRefreshing ? "syncing" : "linked"}
+          </p>
         </div>
 
         {nodes.map((node) => {
-          const isSelected = node.id === selectedId;
+          const isSelected = node.id === selectedNode?.id;
 
           return (
             <button
@@ -177,7 +441,9 @@ export default function MemoryGraph() {
                 isSelected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-[calc(50%+2px)]"
               }`}
               style={{ left: `${node.x}%`, top: `${node.y}%` }}
-              onClick={() => setSelectedId(node.id)}
+              onClick={() => {
+                void selectNode(node);
+              }}
               onPointerDown={(event) => {
                 const bounds = graphRef.current?.getBoundingClientRect();
 
@@ -207,12 +473,89 @@ export default function MemoryGraph() {
         <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-[#2f6f5e]">
           Selected node
         </p>
-        <h3 className="mt-4 text-2xl font-semibold text-[#161b18]">{selectedNode.label}</h3>
-        <p className="mt-2 font-mono text-sm text-[#c5551c]">{selectedNode.kind}</p>
-        <p className="mt-5 text-sm leading-6 text-[#536057]">{selectedNode.summary}</p>
-        <div className="mt-5 rounded-md bg-[#f7f3e8] p-4 text-sm leading-6 text-[#3f4b44]">
-          {selectedNode.detail}
+        <h3 className="mt-4 text-2xl font-semibold text-[#161b18]">{selectedNode?.label}</h3>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <span className="rounded-full bg-[#fff8ec] px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#c5551c]">
+            {selectedNode?.kind}
+          </span>
+          {selectedNode?.metadata?.status ? (
+            <span className="rounded-full bg-[#f1faf5] px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#2f6f5e]">
+              {selectedNode.metadata.status}
+            </span>
+          ) : null}
+          {selectedNode?.score ? (
+            <span className="rounded-full bg-[#f7f9f6] px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#5f746b]">
+              {Math.round(selectedNode.score * 100)}%
+            </span>
+          ) : null}
         </div>
+        <p className="mt-5 text-sm leading-6 text-[#536057]">{selectedNode?.summary}</p>
+        <div className="mt-5 rounded-md bg-[#f7f3e8] p-4 text-sm leading-6 text-[#3f4b44]">
+          {detailLoadingId === selectedNode?.id ? (
+            <span className="text-[#6b746e]">Loading node context...</span>
+          ) : (
+            <>
+              {selectedNode?.detailTitle ? <p className="font-semibold text-[#24352d]">{selectedNode.detailTitle}</p> : null}
+              <p className={selectedNode?.detailTitle ? "mt-2" : undefined}>
+                {selectedNode?.detailBody ?? "Click the node again to load its stored context."}
+              </p>
+            </>
+          )}
+        </div>
+        {selectedNode?.metadata || selectedDate ? (
+          <dl className="mt-5 grid gap-3 text-sm text-[#536057]">
+            {selectedNode.metadata?.owner ? (
+              <div>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Owner</dt>
+                <dd className="mt-1 text-[#24352d]">{selectedNode.metadata.owner}</dd>
+              </div>
+            ) : null}
+            {selectedNode.metadata?.repo ? (
+              <div>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Repo</dt>
+                <dd className="mt-1 text-[#24352d]">{selectedNode.metadata.repo}</dd>
+              </div>
+            ) : null}
+            {selectedDate ? (
+              <div>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Captured</dt>
+                <dd className="mt-1 text-[#24352d]">{selectedDate}</dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : null}
+        {selectedNode?.evidence?.length ? (
+          <div className="mt-5">
+            <p className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Evidence</p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-[#536057]">
+              {selectedNode.evidence.slice(0, 3).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {selectedNode?.relatedFiles?.length ? (
+          <div className="mt-5">
+            <p className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Files</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {selectedNode.relatedFiles.slice(0, 4).map((file) => (
+                <span key={file} className="rounded-md bg-[#f7f9f6] px-2 py-1 font-mono text-xs text-[#344740]">
+                  {file}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {selectedNode?.nextActions?.length ? (
+          <div className="mt-5">
+            <p className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Next</p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-[#536057]">
+              {selectedNode.nextActions.slice(0, 3).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </aside>
     </div>
   );

@@ -1,5 +1,6 @@
 import Image from "next/image";
 import MemoryGraph from "@/components/memory-graph";
+import TestChat from "@/components/test-chat";
 
 const pipeline = [
   {
@@ -58,6 +59,9 @@ export default function Home() {
             <a className="transition hover:text-[#c5551c]" href="#graph">
               Graph
             </a>
+            <a className="transition hover:text-[#c5551c]" href="#try">
+              Try
+            </a>
             <a className="transition hover:text-[#c5551c]" href="#mcp">
               MCP
             </a>
@@ -104,9 +108,9 @@ export default function Home() {
               </a>
               <a
                 className="inline-flex h-12 items-center justify-center rounded-md border border-[#24352d]/25 px-6 text-sm font-bold text-[#24352d] transition hover:border-[#c5551c] hover:text-[#c5551c]"
-                href="#nodes"
+                href="#try"
               >
-                View nodes
+                Try chat
               </a>
             </div>
           </div>
@@ -245,6 +249,23 @@ retrieval:
             </p>
           </div>
           <MemoryGraph />
+        </div>
+      </section>
+
+      <section id="try" className="bg-white">
+        <div className="mx-auto max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+          <div className="mb-10 max-w-3xl">
+            <p className="font-mono text-sm font-semibold uppercase tracking-[0.25em] text-[#2f6f5e]">
+              Test memory capture
+            </p>
+            <h2 className="mt-4 text-4xl font-semibold leading-tight text-[#161b18] sm:text-5xl">
+              Chat first. Store only when the session is done.
+            </h2>
+            <p className="mt-5 text-lg leading-8 text-[#536057]">
+              Add a profile, talk to the NVIDIA-backed demo agent, then mark the conversation done to watch Orange add the session into the shared graph.
+            </p>
+          </div>
+          <TestChat />
         </div>
       </section>
 

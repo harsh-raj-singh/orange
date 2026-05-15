@@ -13,6 +13,17 @@ export type DemoMemoryNode = {
   summary: string;
   score?: number;
   metadata: {
+    name?: string;
+    role?: string;
+    company?: string;
+    team?: string;
+    project?: string;
+    currentChallenge?: string;
+    timestamp?: string;
+    date?: string;
+    sessionId?: string;
+    source?: string;
+    trigger?: string;
     owner?: string;
     repo?: string;
     createdAt: string;

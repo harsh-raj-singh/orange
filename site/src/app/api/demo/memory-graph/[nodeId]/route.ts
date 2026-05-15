@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { getDemoMemoryNodeDetail } from "@/lib/demo-memory-graph";
+import { getDemoMemoryNodeDetailFromStore } from "@/lib/demo-memory-store";
 
-export const dynamic = "force-static";
+export const dynamic = "force-dynamic";
 
 type RouteContext = {
   params: Promise<{
@@ -12,7 +12,7 @@ type RouteContext = {
 
 export async function GET(_request: Request, context: RouteContext) {
   const { nodeId } = await context.params;
-  const node = getDemoMemoryNodeDetail(nodeId);
+  const node = getDemoMemoryNodeDetailFromStore(nodeId);
 
   if (!node) {
     return NextResponse.json(
