@@ -179,7 +179,7 @@ def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_n
     assert mock_chroma.query_calls[1]["where"] == {"scope": "global", "org_id": "acme"}
 
 
-def test_ping_context_global_scope_hides_contributor_and_uses_global_threshold(mock_neo4j, mock_chroma) -> None:
+def test_ping_context_global_scope_hides_contributor_and_uses_requested_threshold(mock_neo4j, mock_chroma) -> None:
     mock_neo4j.problems[("p-global", "")] = {
         "node_id": "p-global",
         "canonical_label": "global redis problem",
@@ -201,7 +201,7 @@ def test_ping_context_global_scope_hides_contributor_and_uses_global_threshold(m
         ]],
     }
 
-    req = PingContextRequest(query="redis", user_id="u1", source="cursor", min_score=0.95, scope="global", org_id="acme")
+    req = PingContextRequest(query="redis", user_id="u1", source="cursor", min_score=0.70, scope="global", org_id="acme")
     resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
 
     assert len(resp.matched_nodes) == 1

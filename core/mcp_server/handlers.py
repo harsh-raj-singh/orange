@@ -232,7 +232,7 @@ async def handle_ping_context(
         if not neo4j_node_id:
             continue
         similarity_score = round(1.0 - float(distance), 4) if distance is not None else 0.0
-        threshold = 0.72 if vector_scope == "global" else min_score
+        threshold = min_score
         if similarity_score < threshold:
             continue
 
