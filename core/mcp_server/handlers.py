@@ -44,7 +44,11 @@ def _run_neo4j(neo4j: object, query: str, **params):
         return neo4j.run(query, **params)
     if hasattr(neo4j, "session"):
         with neo4j.session() as session:
-            return session.run(query, **params)
+            result = session.run(query, **params)
+            if hasattr(result, "data"):
+                data = result.data()
+                return data[0] if data else None
+            return result
     raise ValueError("Neo4j client must expose run(...) or session().")
 
 
