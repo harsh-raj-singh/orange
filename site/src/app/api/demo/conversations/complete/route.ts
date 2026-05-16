@@ -4,7 +4,7 @@ import {
   completeDemoConversation,
   type CompleteDemoConversationInput,
 } from "@/lib/demo-memory-store";
-import { orangeBackendFetch } from "@/lib/orange-backend";
+import { backendJsonOrFallback } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -37,28 +37,24 @@ export async function POST(request: Request) {
     contribute_to_global: body.contribute_to_global ?? true,
   };
 
-  try {
-    const backendResult = await orangeBackendFetch<Record<string, unknown>>("/demo/complete", {
-      method: "POST",
-      body: completionBody,
-    });
-
-    if (backendResult) {
-      return NextResponse.json({
+  return NextResponse.json(
+    await backendJsonOrFallback<Record<string, unknown>, Record<string, unknown>>({
+      path: "/demo/complete",
+      request: {
+        method: "POST",
+        body: completionBody,
+      },
+      warning: "orange_backend_completion_failed",
+      transform: (backendResult) => ({
         ...backendResult,
         persisted: true,
         fallback: false,
-      });
-    }
-  } catch (error) {
-    console.warn("orange_backend_completion_failed", error);
-  }
-
-  const graph = completeDemoConversation(completionBody);
-
-  return NextResponse.json({
-    ...graph,
-    persisted: false,
-    fallback: true,
-  });
+      }),
+      fallback: () => ({
+        ...completeDemoConversation(completionBody),
+        persisted: false,
+        fallback: true,
+      }),
+    }),
+  );
 }

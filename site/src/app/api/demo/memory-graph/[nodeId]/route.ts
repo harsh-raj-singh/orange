@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getDemoMemoryNodeDetailFromStore } from "@/lib/demo-memory-store";
-import { orangeBackendFetch } from "@/lib/orange-backend";
+import { backendJsonOrFallback, normalizeDemoGraphScope } from "@/lib/api";
 import { transformBackendGraph, type BackendGraph } from "@/lib/orange-graph-transform";
 
 export const dynamic = "force-dynamic";
@@ -12,23 +12,18 @@ type RouteContext = {
   }>;
 };
 
-function normalizeScope(value: string | null) {
-  return value === "user" || value === "global" || value === "both" ? value : "both";
-}
-
 export async function GET(request: Request, context: RouteContext) {
   const { nodeId } = await context.params;
-  const scope = normalizeScope(new URL(request.url).searchParams.get("scope"));
+  const scope = normalizeDemoGraphScope(new URL(request.url).searchParams.get("scope"));
 
-  try {
-    const graph = await orangeBackendFetch<BackendGraph>(
-      `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood?scope=${scope}`,
-    );
-    if (graph) {
+  const node = await backendJsonOrFallback({
+    path: `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood?scope=${scope}`,
+    warning: "orange_backend_node_failed",
+    transform: (graph: BackendGraph) => {
       const transformed = transformBackendGraph(graph, scope);
       const node = transformed.nodes.find((candidate) => candidate.id === nodeId);
       if (node) {
-        return NextResponse.json({
+        return {
           ...node,
           detail: {
             title: node.label,
@@ -39,14 +34,12 @@ export async function GET(request: Request, context: RouteContext) {
             relatedFiles: [],
             nextActions: ["Use this neighborhood as context when similar work appears."],
           },
-        });
+        };
       }
-    }
-  } catch (error) {
-    console.warn("orange_backend_node_failed", error);
-  }
-
-  const node = getDemoMemoryNodeDetailFromStore(nodeId);
+      return null;
+    },
+    fallback: () => getDemoMemoryNodeDetailFromStore(nodeId),
+  });
 
   if (!node) {
     return NextResponse.json(

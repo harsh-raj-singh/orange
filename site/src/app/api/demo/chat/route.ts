@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeMemoryScope } from "@/lib/api";
 import { orangeBackendFetch } from "@/lib/orange-backend";
 
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
@@ -65,10 +66,6 @@ type OpenAIChatResponse = {
     message?: string;
   };
 };
-
-function normalizeScope(value: unknown): "user" | "global" {
-  return value === "global" || value === "shared" ? "global" : "user";
-}
 
 function normalizeMessage(message: IncomingMessage) {
   const role = message.role === "assistant" ? "assistant" : "user";
@@ -142,14 +139,14 @@ function buildMemoryContext(memory?: PingContextResponse | null) {
       label,
       node_type: node.node_type ?? "Memory",
       similarity_score: node.similarity_score ?? 0,
-      scope: normalizeScope(node.scope ?? node.source ?? node.node_data?.scope),
+      scope: normalizeMemoryScope(node.scope ?? node.source ?? node.node_data?.scope),
     };
   });
 
   const context = nodes
     .map((node, index) => {
       const label = node.node_data?.canonical_label ?? `Memory ${index + 1}`;
-      const scope = normalizeScope(node.scope ?? node.source ?? node.node_data?.scope);
+      const scope = normalizeMemoryScope(node.scope ?? node.source ?? node.node_data?.scope);
       const description =
         node.node_data?.description ??
         node.node_data?.in_depth_summary ??
