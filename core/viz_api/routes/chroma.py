@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from core.viz_api.dependencies import get_chroma
 
 router = APIRouter()
-_EMBED_FN = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+_EMBED_FN = DefaultEmbeddingFunction()
 _COLLECTION = "orange_node_vectors"
 
 

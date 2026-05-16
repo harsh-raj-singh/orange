@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 from core.graph_schema_v2 import Problem
 from core.graph_upsert.embeddings import build_problem_embed_string
@@ -13,7 +13,7 @@ from core.graph_upsert.models import MergeDecision
 ORANGE_USER_VECTOR_COLLECTION = "orange_user_vectors"
 ORANGE_GLOBAL_VECTOR_COLLECTION = "orange_global_vectors"
 ORANGE_NODE_VECTOR_COLLECTION = ORANGE_USER_VECTOR_COLLECTION
-_EMBED_FN = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+_EMBED_FN = DefaultEmbeddingFunction()
 
 ARBITRATION_PROMPT = """You are deciding whether two problem descriptions refer to the same underlying technical problem.
 

@@ -7,8 +7,6 @@ pydantic>=2.6,<3
 
 neo4j==5.25.0
 chromadb==0.4.24
-sentence-transformers==5.0.0
-torch==2.2.2+cpu
 numpy==1.26.4
 
 openai==2.15.0
