@@ -23,6 +23,9 @@ class EnrichedProblem(BaseModel):
     segment_id: str  # matches RawProblemSegment.segment_id
     canonical_label: str
     description: str
+    display_label: str = ""
+    display_summary: str = ""
+    raw_description: str = ""
     llm_reasoning: str
     error_code: str | None = None
     error_type: str | None = None
@@ -50,6 +53,9 @@ class ExtractedSolution(BaseModel):
 
     canonical_label: str
     description: str
+    display_label: str = ""
+    display_summary: str = ""
+    raw_description: str = ""
     in_depth_summary: str
     outcome: SolutionOutcome = SolutionOutcome.UNTRIED
     failure_reason: str | None = None

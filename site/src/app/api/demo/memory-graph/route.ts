@@ -7,11 +7,18 @@ import { transformBackendGraph, type BackendGraph } from "@/lib/orange-graph-tra
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const scope = normalizeDemoGraphScope(new URL(request.url).searchParams.get("scope"));
+  const params = new URL(request.url).searchParams;
+  const scope = normalizeDemoGraphScope(params.get("scope"));
+  const userEmail = params.get("user_email")?.trim().toLowerCase();
+  const backendParams = new URLSearchParams({ scope });
+  if (userEmail) {
+    backendParams.set("user_email", userEmail);
+    backendParams.set("user_id", userEmail);
+  }
 
   return NextResponse.json(
     await backendJsonOrFallback<BackendGraph, ReturnType<typeof getScopedDemoMemoryGraphSnapshot>>({
-      path: `/graph/full?scope=${scope}`,
+      path: `/graph/full?${backendParams.toString()}`,
       warning: "orange_backend_graph_failed",
       transform: (graph) => ({
         generatedAt: new Date().toISOString(),

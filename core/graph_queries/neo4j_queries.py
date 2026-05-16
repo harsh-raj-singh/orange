@@ -141,6 +141,14 @@ def _empty_graph() -> dict[str, list[dict[str, Any]]]:
     return {"nodes": [], "edges": []}
 
 
+def _without_raw_description(graph: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    for node in graph.get("nodes", []):
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            properties.pop("raw_description", None)
+    return graph
+
+
 def _neo4j_record_to_node(node) -> dict:
     """Convert a neo4j Node object to serializable dict."""
     return {
@@ -160,20 +168,94 @@ def _neo4j_record_to_edge(rel, source_id: str, target_id: str) -> dict:
     }
 
 
-def get_full_graph(driver, user_id: str | None = None) -> dict:
+def get_full_graph(
+    driver,
+    user_id: str | None = None,
+    *,
+    scope: str = "both",
+    user_email: str | None = None,
+    include_raw: bool = False,
+) -> dict:
     """
     Returns all nodes + all edges in {nodes: [...], edges: [...]} format.
     If user_id provided, filter nodes by user_id property.
     """
     query = """
     MATCH (n)
-    WHERE $user_id IS NULL OR n.user_id = $user_id
+    WHERE
+      (
+        $scope = 'both'
+        AND (
+          n.scope = 'global'
+          OR n.scope IS NULL
+          OR (
+            n.scope = 'user'
+            AND (
+              $user_email IS NULL
+              OR n.user_email = $user_email
+              OR n.user_id = $user_email
+              OR n.user_id = $user_id
+            )
+          )
+        )
+      )
+      OR ($scope = 'global' AND n.scope = 'global')
+      OR (
+        $scope = 'user'
+        AND (
+          n.scope = 'user'
+          OR n.scope IS NULL
+        )
+        AND (
+          $user_email IS NULL
+          OR n.user_email = $user_email
+          OR n.user_id = $user_email
+          OR n.user_id = $user_id
+        )
+      )
     OPTIONAL MATCH (n)-[r]->(m)
-    WHERE $user_id IS NULL OR m.user_id = $user_id
+    WHERE m IS NULL OR (
+      (
+        $scope = 'both'
+        AND (
+          m.scope = 'global'
+          OR m.scope IS NULL
+          OR (
+            m.scope = 'user'
+            AND (
+              $user_email IS NULL
+              OR m.user_email = $user_email
+              OR m.user_id = $user_email
+              OR m.user_id = $user_id
+            )
+          )
+        )
+      )
+      OR ($scope = 'global' AND m.scope = 'global')
+      OR (
+        $scope = 'user'
+        AND (
+          m.scope = 'user'
+          OR m.scope IS NULL
+        )
+        AND (
+          $user_email IS NULL
+          OR m.user_email = $user_email
+          OR m.user_id = $user_email
+          OR m.user_id = $user_id
+        )
+      )
+    )
     RETURN n, r, m
     """
 
-    records = _run_query(driver, query, user_id=user_id)
+    records = _run_query(
+        driver,
+        query,
+        user_id=user_id,
+        user_email=user_email,
+        scope=scope if scope in {"user", "global", "both"} else "both",
+    )
     nodes_by_id: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
     seen_edges: set[tuple[str, str, str, str]] = set()
@@ -194,7 +276,8 @@ def get_full_graph(driver, user_id: str | None = None) -> dict:
         edge = _neo4j_record_to_edge(r, source_id=source_id, target_id=target_id)
         _add_edge(edges, seen_edges, edge)
 
-    return {"nodes": list(nodes_by_id.values()), "edges": edges}
+    graph = {"nodes": list(nodes_by_id.values()), "edges": edges}
+    return graph if include_raw else _without_raw_description(graph)
 
 
 def get_node_with_neighborhood(driver, node_id: str) -> dict:

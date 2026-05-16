@@ -51,11 +51,8 @@ const profileFields: ReadonlyArray<{
   type?: string;
   multiline?: boolean;
 }> = [
-  { id: "name", label: "Name", placeholder: "Avery Chen" },
   { id: "email", label: "Email", placeholder: "avery@acme.com", type: "email" },
-  { id: "role", label: "Role", placeholder: "Staff engineer" },
   { id: "company", label: "Company", placeholder: "Acme Cloud" },
-  { id: "teamProject", label: "Team or project", placeholder: "Platform reliability" },
 ];
 
 function createId(prefix: string) {
@@ -135,7 +132,7 @@ export default function TestChat() {
   });
 
   const isProfileReady = useMemo(
-    () => Object.values(profile).every((value) => value.trim().length > 0),
+    () => profile.email.trim().length > 0 && profile.company.trim().length > 0,
     [profile],
   );
   const hasUnsavedMessages = messages.length > lastSavedCount;
@@ -227,10 +224,12 @@ export default function TestChat() {
     event.preventDefault();
 
     if (!isProfileReady) {
-      setError("Complete each profile field to start the demo.");
+      setError("Add your email and company to start the demo.");
       return;
     }
 
+    window.localStorage.setItem("orange-demo-profile", JSON.stringify(profile));
+    window.dispatchEvent(new CustomEvent("orange-demo-profile-updated"));
     setError(null);
     setIsProfileSubmitted(true);
   }
@@ -389,7 +388,7 @@ export default function TestChat() {
             </p>
             <h2 className="mt-2 text-2xl font-semibold text-[#161b18]">Start a test session</h2>
           </div>
-          <p className="font-mono text-xs text-[#5f746b]">required before chat</p>
+          <p className="font-mono text-xs text-[#5f746b]">email and company required</p>
         </div>
 
         <form className="grid gap-4 md:grid-cols-2" onSubmit={submitProfile}>
@@ -450,7 +449,7 @@ export default function TestChat() {
             Test chat
           </p>
           <h2 className="mt-1 text-xl font-semibold text-[#161b18]">
-            {profile.name} · {profile.teamProject}
+            {profile.email} · {profile.company}
           </h2>
         </div>
         <button
@@ -467,12 +466,12 @@ export default function TestChat() {
         <aside className="border-b border-[#24352d]/10 bg-[#f7f3e8] p-5 lg:border-b-0 lg:border-r">
           <dl className="grid gap-4 text-sm">
             <div>
-              <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Role</dt>
-              <dd className="mt-1 font-semibold text-[#24352d]">{profile.role}</dd>
-            </div>
-            <div>
               <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Company</dt>
               <dd className="mt-1 font-semibold text-[#24352d]">{profile.company}</dd>
+            </div>
+            <div>
+              <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Email</dt>
+              <dd className="mt-1 font-semibold text-[#24352d]">{profile.email}</dd>
             </div>
             <div>
               <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Sharing</dt>
@@ -503,7 +502,7 @@ export default function TestChat() {
                     }`}
                   >
                     <p className="mb-1 font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#5f746b]">
-                      {message.role === "user" ? profile.name : "Orange"}
+                      {message.role === "user" ? profile.email || "You" : "Orange"}
                     </p>
                     {message.role === "assistant" && message.memory?.length ? (
                       <div className="mb-2 flex flex-wrap gap-1.5">

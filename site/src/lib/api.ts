@@ -15,6 +15,10 @@ type BackendFallbackOptions<TBackend, TResult> = {
   fallback: () => TResult;
 };
 
+export type FallbackResponse<T> = T & {
+  source?: "backend" | "fallback";
+};
+
 export function normalizeDemoGraphScope(value: string | null): DemoGraphScope {
   return value === "user" || value === "global" || value === "both" ? value : "both";
 }
@@ -35,12 +39,13 @@ export async function backendJsonOrFallback<TBackend, TResult>({
     if (backendResult) {
       const transformed = await transform(backendResult);
       if (transformed) {
-        return transformed;
+        return { ...transformed, source: "backend" };
       }
     }
   } catch (error) {
     console.warn(warning, error);
   }
 
-  return fallback();
+  console.warn(`${warning}_serving_fallback`);
+  return { ...fallback(), source: "fallback" };
 }

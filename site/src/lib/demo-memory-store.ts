@@ -261,13 +261,21 @@ function addEdge(state: DemoMemoryStoreState, edge: DemoMemoryEdge) {
   state.edges.set(edge.id, cloneEdge(edge));
 }
 
+function isDisplayNode(node: DemoMemoryNode) {
+  return node.type !== "Session";
+}
+
 export function getDemoMemoryGraphSnapshot(): DemoMemoryGraphSnapshot {
   const state = getState();
+  const nodes = [...state.nodes.values()].map(cloneNode).map(sanitizeSharedNode).filter(isDisplayNode);
+  const visibleNodeIds = new Set(nodes.map((node) => node.id));
 
   return {
     generatedAt: new Date().toISOString(),
-    nodes: [...state.nodes.values()].map(cloneNode).map(sanitizeSharedNode),
-    edges: [...state.edges.values()].map(cloneEdge),
+    nodes,
+    edges: [...state.edges.values()]
+      .map(cloneEdge)
+      .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
   };
 }
 

@@ -19,12 +19,14 @@ type MemoryNode = {
   };
   detailTitle?: string;
   detailBody?: string;
+  rawContext?: string;
   evidence?: string[];
   relatedFiles?: string[];
   nextActions?: string[];
 };
 
 type MemoryScopeValue = "user" | "global";
+type MemoryScopeFilter = MemoryScopeValue | "both";
 
 type MemoryEdge = {
   id: string;
@@ -101,6 +103,12 @@ const fallbackEdges: MemoryEdge[] = [
   { id: "allowed-origins-session", source: "allowed-origins", target: "session", strength: 0.62 },
 ];
 
+const visibleMemoryNodes = memoryNodes.filter((node) => node.kind !== "Session");
+const visibleMemoryNodeIds = new Set(visibleMemoryNodes.map((node) => node.id));
+const visibleFallbackEdges = fallbackEdges.filter(
+  (edge) => visibleMemoryNodeIds.has(edge.source) && visibleMemoryNodeIds.has(edge.target),
+);
+
 const kindClass: Record<MemoryNode["kind"], string> = {
   Problem: "border-[#c5551c] bg-[#fff8ec] text-[#8f3b14]",
   Attempt: "border-[#c3a46b] bg-[#fffdf6] text-[#6d5421]",
@@ -110,9 +118,10 @@ const kindClass: Record<MemoryNode["kind"], string> = {
   Session: "border-[#24352d] bg-[#f6f7f4] text-[#24352d]",
 };
 
-const scopeOptions: ReadonlyArray<{ value: MemoryScopeValue; label: string }> = [
+const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
   { value: "user", label: "My Memory" },
-  { value: "global", label: "Global Knowledge" },
+  { value: "global", label: "Global" },
+  { value: "both", label: "Both" },
 ];
 
 const scopeNodeClass: Record<MemoryScopeValue, string> = {
@@ -138,6 +147,10 @@ function asNumber(value: unknown) {
 
 function normalizeScope(value: unknown): MemoryScopeValue {
   return value === "global" || value === "shared" ? "global" : "user";
+}
+
+function truncateLabel(value: string, maxLength = 30) {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1).trim()}...`;
 }
 
 function clampPosition(value: number, min: number, max: number) {
@@ -214,6 +227,7 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
       }
     : existing?.metadata;
   const detailBody = asString(value.detail) ?? asString(detail?.body) ?? existing?.detailBody;
+  const rawContext = asString(detail?.fullContext) ?? asString(detail?.rawDescription) ?? existing?.rawContext;
 
   return {
     id,
@@ -226,6 +240,7 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
     metadata,
     detailTitle: asString(detail?.title) ?? existing?.detailTitle,
     detailBody,
+    rawContext,
     evidence: asStringArray(detail?.evidence) ?? existing?.evidence,
     relatedFiles: asStringArray(detail?.relatedFiles) ?? existing?.relatedFiles,
     nextActions: asStringArray(detail?.nextActions) ?? existing?.nextActions,
@@ -273,19 +288,34 @@ function formatDate(value?: string) {
 }
 
 export default function MemoryGraph() {
-  const [nodes, setNodes] = useState(memoryNodes);
-  const [edges, setEdges] = useState<MemoryEdge[]>(fallbackEdges);
+  const [nodes, setNodes] = useState(visibleMemoryNodes);
+  const [edges, setEdges] = useState<MemoryEdge[]>(visibleFallbackEdges);
   const [selectedId, setSelectedId] = useState("cors");
-  const [scope, setScope] = useState<MemoryScopeValue>("user");
+  const [scope, setScope] = useState<MemoryScopeFilter>("user");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
   const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
   const [introVisible, setIntroVisible] = useState(false);
+  const [userEmail, setUserEmail] = useState(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    try {
+      const storedProfile = window.localStorage.getItem("orange-demo-profile");
+      if (!storedProfile) {
+        return "";
+      }
+      const parsed = JSON.parse(storedProfile) as { email?: unknown };
+      return typeof parsed.email === "string" ? parsed.email.trim().toLowerCase() : "";
+    } catch {
+      return "";
+    }
+  });
   const graphRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
-  const seenNodeIdsRef = useRef(new Set(memoryNodes.map((node) => node.id)));
+  const seenNodeIdsRef = useRef(new Set(visibleMemoryNodes.map((node) => node.id)));
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedId) ?? nodes[0],
@@ -293,6 +323,25 @@ export default function MemoryGraph() {
   );
   const selectedDate = formatDate(selectedNode?.metadata?.createdAt);
   const selectedScope = nodeScope(selectedNode);
+
+  useEffect(() => {
+    function handleProfileUpdate() {
+      try {
+        const storedProfile = window.localStorage.getItem("orange-demo-profile");
+        if (storedProfile) {
+          const parsed = JSON.parse(storedProfile) as { email?: unknown };
+          if (typeof parsed.email === "string") {
+            setUserEmail(parsed.email.trim().toLowerCase());
+          }
+        }
+      } catch {
+        setUserEmail("");
+      }
+    }
+
+    window.addEventListener("orange-demo-profile-updated", handleProfileUpdate);
+    return () => window.removeEventListener("orange-demo-profile-updated", handleProfileUpdate);
+  }, []);
 
   const resolveOverlaps = useCallback((input: MemoryNode[]) => {
     const next = input.map((node) => ({ ...node }));
@@ -319,7 +368,11 @@ export default function MemoryGraph() {
     }
 
     try {
-      const response = await fetch(`/api/demo/memory-graph?scope=${scope}`, {
+      const params = new URLSearchParams({ scope });
+      if (userEmail) {
+        params.set("user_email", userEmail);
+      }
+      const response = await fetch(`/api/demo/memory-graph?${params.toString()}`, {
         cache: "no-store",
       });
 
@@ -368,7 +421,7 @@ export default function MemoryGraph() {
         setIsRefreshing(false);
       }
     }
-  }, [resolveOverlaps, scope, selectedId]);
+  }, [resolveOverlaps, scope, selectedId, userEmail]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => {
@@ -485,7 +538,7 @@ export default function MemoryGraph() {
         <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#5f746b]">
           Memory scope
         </p>
-        <div className="grid grid-cols-2 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
+        <div className="grid grid-cols-3 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
           {scopeOptions.map((option) => (
             <button
               key={option.value}
@@ -630,14 +683,7 @@ export default function MemoryGraph() {
                 <span className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em]">
                   {node.kind}
                 </span>
-                <span
-                  className={`ml-2 rounded-full px-1.5 py-0.5 font-mono text-[0.58rem] font-semibold uppercase tracking-[0.1em] ${
-                    currentScope === "global" ? "bg-[#f5f2ff] text-[#55479a]" : "bg-[#fff8ec] text-[#8f3b14]"
-                  }`}
-                >
-                  {currentScope === "global" ? "Shared" : "Private"}
-                </span>
-                <span className="mt-1 block text-sm font-semibold leading-5">{node.label}</span>
+                <span className="mt-1 block text-sm font-semibold leading-5">{truncateLabel(node.label)}</span>
               </button>
             );
           })}
@@ -668,7 +714,7 @@ export default function MemoryGraph() {
               selectedScope === "global" ? "bg-[#f5f2ff] text-[#55479a]" : "bg-[#fff8ec] text-[#8f3b14]"
             }`}
           >
-            {selectedScope === "global" ? "Shared" : "Private"}
+            {selectedScope === "global" ? "🌐 Shared" : "🔒 Private"}
           </span>
         </div>
         <p className="mt-5 text-sm leading-6 text-[#536057]">{selectedNode?.summary}</p>
@@ -689,6 +735,14 @@ export default function MemoryGraph() {
             </>
           )}
         </div>
+        {selectedNode?.rawContext ? (
+          <details className="mt-3 rounded-md border border-[#24352d]/10 bg-[#fbfaf5] p-3 text-sm leading-6 text-[#3f4b44]">
+            <summary className="cursor-pointer font-mono text-xs font-semibold uppercase tracking-[0.14em] text-[#879189]">
+              Full context
+            </summary>
+            <p className="mt-3 whitespace-pre-wrap">{selectedNode.rawContext}</p>
+          </details>
+        ) : null}
         {selectedNode?.metadata || selectedDate ? (
           <dl className="mt-5 grid gap-3 text-sm text-[#536057]">
             {selectedScope !== "global" && selectedNode.metadata?.owner ? (

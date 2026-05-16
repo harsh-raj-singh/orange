@@ -19,9 +19,13 @@ router = APIRouter()
 
 
 @router.get("/full")
-async def full_graph(user_id: str | None = None) -> JSONResponse:
+async def full_graph(
+    user_id: str | None = None,
+    user_email: str | None = None,
+    scope: str = "both",
+) -> JSONResponse:
     try:
-        data = get_full_graph(get_neo4j(), user_id=user_id)
+        data = get_full_graph(get_neo4j(), user_id=user_id, user_email=user_email, scope=scope)
         return JSONResponse(data)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"error": str(exc)})

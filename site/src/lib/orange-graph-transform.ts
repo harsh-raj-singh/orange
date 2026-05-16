@@ -28,6 +28,14 @@ function asNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function compactText(value: string, maxLength: number) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - 1).trim()}...`;
+}
+
 function statusFor(label?: string): DemoMemoryNode["metadata"]["status"] {
   if (label === "Solution") {
     return "resolved";
@@ -52,6 +60,43 @@ function nodeTypeFor(label?: string): DemoMemoryNodeType {
   return "Concept";
 }
 
+function backendNodeType(node: BackendNode) {
+  const properties = node.properties ?? {};
+  return (
+    asString(properties.node_type) ??
+    asString(properties.type) ??
+    asString(properties.kind) ??
+    asString(node.label) ??
+    "Concept"
+  );
+}
+
+function isIdentityLike(node: BackendNode) {
+  const properties = node.properties ?? {};
+  const rawType = backendNodeType(node).toLowerCase();
+  const label = [
+    asString(node.label),
+    asString(properties.label),
+    asString(properties.name),
+    asString(properties.email),
+    asString(properties.user_email),
+    asString(properties.canonical_label),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (rawType === "session" || rawType === "user") {
+    return true;
+  }
+
+  if (/\b[\w.%+-]+@[\w.-]+\.[a-z]{2,}\b/i.test(label)) {
+    return true;
+  }
+
+  const name = asString(properties.name) ?? asString(properties.full_name);
+  return Boolean(name && !asString(properties.canonical_label) && rawType !== "concept");
+}
+
 function scopeFor(properties: Record<string, unknown>, fallback: MemoryScope) {
   const rawScope =
     asString(properties.scope) ??
@@ -71,31 +116,38 @@ function scopeFor(properties: Record<string, unknown>, fallback: MemoryScope) {
 
 export function transformBackendGraph(graph: BackendGraph, requestedScope: MemoryScope = "both") {
   const nodes = (graph.nodes ?? [])
+    .filter((node) => !isIdentityLike(node))
     .map((node): DemoMemoryNode | null => {
       const id = asString(node.id);
       if (!id) {
         return null;
       }
       const properties = node.properties ?? {};
-      const nodeType = nodeTypeFor(asString(node.label));
+      const nodeType = nodeTypeFor(backendNodeType(node));
       const scope = scopeFor(properties, requestedScope);
       const label =
+        asString(properties.display_label) ??
         asString(properties.canonical_label) ??
         asString(properties.title) ??
         asString(properties.locator) ??
         id;
       const summary =
+        asString(properties.display_summary) ??
         asString(properties.description) ??
         asString(properties.in_depth_summary) ??
         asString(properties.summary) ??
         asString(properties.context_brief) ??
         "Stored Orange memory.";
+      const rawDescription =
+        asString(properties.raw_description) ??
+        asString(properties.description) ??
+        asString(properties.in_depth_summary);
 
       return {
         id,
-        label,
+        label: compactText(label, 72),
         type: nodeType,
-        summary,
+        summary: compactText(summary, 220),
         score: asNumber(properties.score) ?? 0.9,
         metadata: {
           owner: asString(properties.user_id) ?? asString(properties.org_id),
@@ -107,7 +159,20 @@ export function transformBackendGraph(graph: BackendGraph, requestedScope: Memor
           status: statusFor(nodeType),
           scope,
         } as DemoMemoryNode["metadata"] & { scope: Exclude<MemoryScope, "both"> },
-      } satisfies DemoMemoryNode;
+        detail: rawDescription
+          ? {
+              title: compactText(label, 72),
+              body: compactText(summary, 220),
+              fullContext: rawDescription,
+            }
+          : undefined,
+      } as DemoMemoryNode & {
+        detail?: {
+          title?: string;
+          body?: string;
+          fullContext?: string;
+        };
+      };
     })
     .filter((node): node is DemoMemoryNode => Boolean(node))
     .filter((node) => {

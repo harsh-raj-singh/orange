@@ -19,6 +19,7 @@ from core.agents.solution_agent.prompts import (
     SOLUTION_AGENT_USER_SCOPE_PROMPT,
 )
 from core.agents.solution_agent.runner import run_solution_agent
+from core.agents.summarizer import summarize_extraction_outputs
 from core.ingestion import NormalizedSession, SessionIngestionRequest, normalize_ingestion_request
 from core.graph_upsert.writer import GraphUpsertEngine
 from core.graph_schema_v2 import Session, SourceType
@@ -101,6 +102,11 @@ async def _run_for_scope(
         logger.error("issue_agent_failed", extra={"session_id": scoped_session_id, "error": str(exc)})
         scoped_errors.append(f"Issue agent failed: {exc}")
         return {"problems_created": 0, "solutions_written": 0, "edges_written": 0}, scoped_errors
+
+    try:
+        issue_output, solution_output = await summarize_extraction_outputs(issue_output, solution_output)
+    except Exception as exc:
+        logger.warning("summarizer_failed_continuing", extra={"session_id": scoped_session_id, "error": str(exc)})
 
     try:
         engine = GraphUpsertEngine(neo4j=neo4j_client, chroma=chroma_client)
