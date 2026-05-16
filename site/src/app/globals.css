@@ -309,6 +309,7 @@ html[data-scrolled] .site-nav {
 }
 
 .source-node:hover,
+.source-node:focus,
 .source-node:focus-visible {
   border-color: var(--source-color);
   background:
@@ -413,6 +414,7 @@ html[data-scrolled] .site-nav {
 }
 
 .source-node:hover .source-tooltip,
+.source-node:focus .source-tooltip,
 .source-node:focus-visible .source-tooltip {
   opacity: 1;
   transform: translate(-50%, -4px);
