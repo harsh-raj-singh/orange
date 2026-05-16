@@ -32,6 +32,7 @@ html {
 }
 
 .site-nav {
+  z-index: 40;
   border-bottom: 1px solid transparent;
   background: rgba(13, 18, 16, 0.18);
   transition:
@@ -54,6 +55,40 @@ html[data-scrolled] .site-nav {
   overflow: hidden;
   perspective: 700px;
   vertical-align: top;
+}
+
+.hero-section {
+  --torch-x: -999px;
+  --torch-y: -999px;
+}
+
+.hero-darkness {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  display: block;
+  opacity: 0.93;
+  background: radial-gradient(
+    circle 180px at var(--torch-x, -999px) var(--torch-y, -999px),
+    rgba(255, 160, 60, 0.04) 0%,
+    transparent 30%,
+    transparent 40%,
+    rgba(10, 10, 10, 0.85) 70%,
+    rgba(10, 10, 10, 1) 100%
+  );
+  transition: opacity 0.8s ease;
+}
+
+.orange-tagline {
+  max-width: 480px;
+  margin-top: 2rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 1.05rem;
+  font-style: italic;
+  line-height: 1.65;
+  letter-spacing: 0.01em;
+  opacity: 0;
 }
 
 .hero-word-mask > span,

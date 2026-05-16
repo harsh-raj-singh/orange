@@ -47,10 +47,117 @@ export default function SiteMotion() {
     window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
 
+    const hero = document.querySelector<HTMLElement>(".hero-section");
+    const darkness = document.querySelector<HTMLElement>(".hero-darkness");
+    const tagline = document.querySelector<HTMLElement>(".orange-tagline");
+    const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+    let torchRaf = 0;
+    let latestMouseEvent: MouseEvent | null = null;
+
+    const closeTorch = () => {
+      hero?.style.setProperty("--torch-x", "-999px");
+      hero?.style.setProperty("--torch-y", "-999px");
+    };
+
+    const updateTorch = () => {
+      if (!hero || !latestMouseEvent) {
+        torchRaf = 0;
+        return;
+      }
+
+      const rect = hero.getBoundingClientRect();
+      hero.style.setProperty("--torch-x", `${latestMouseEvent.clientX - rect.left}px`);
+      hero.style.setProperty("--torch-y", `${latestMouseEvent.clientY - rect.top}px`);
+      torchRaf = 0;
+    };
+
+    const handleHeroMouseMove = (event: MouseEvent) => {
+      latestMouseEvent = event;
+      if (torchRaf) {
+        return;
+      }
+      torchRaf = window.requestAnimationFrame(updateTorch);
+    };
+
+    if (hero && !isTouchDevice && !reducedMotion) {
+      hero.addEventListener("mousemove", handleHeroMouseMove, { passive: true });
+      hero.addEventListener("mouseleave", closeTorch, { passive: true });
+    }
+
+    if (reducedMotion && darkness && tagline) {
+      darkness.style.opacity = "0";
+      darkness.style.display = "none";
+      tagline.style.opacity = "1";
+    }
+
     if (!reducedMotion) {
       let media: ReturnType<typeof gsap.matchMedia> | null = null;
       let refreshTimer = 0;
       const ctx = gsap.context(() => {
+        const revealHero = () => {
+          if (!darkness || !tagline) {
+            return;
+          }
+
+          darkness.style.display = "block";
+          gsap.to(darkness, {
+            opacity: 0,
+            duration: 1.2,
+            ease: "power2.inOut",
+            onComplete: () => {
+              darkness.style.display = "none";
+            },
+          });
+
+          gsap.fromTo(
+            tagline,
+            { opacity: 0, y: 20 },
+            { opacity: 1, y: 0, duration: 1, delay: 0.4, ease: "power3.out" },
+          );
+        };
+
+        const darkenHero = () => {
+          if (!darkness || !tagline || isTouchDevice) {
+            return;
+          }
+
+          darkness.style.display = "block";
+          gsap.to(darkness, {
+            opacity: 0.93,
+            duration: 0.6,
+            ease: "power2.in",
+          });
+          gsap.to(tagline, { opacity: 0, y: 12, duration: 0.3, ease: "power2.in" });
+          closeTorch();
+        };
+
+        if (darkness && tagline) {
+          if (isTouchDevice) {
+            gsap.to(darkness, {
+              opacity: 0,
+              duration: 1.4,
+              delay: 2.5,
+              ease: "power2.inOut",
+              onComplete: () => {
+                darkness.style.display = "none";
+              },
+            });
+            gsap.fromTo(
+              tagline,
+              { opacity: 0, y: 16 },
+              { opacity: 1, y: 0, duration: 1, delay: 3.2, ease: "power3.out" },
+            );
+          } else {
+            ScrollTrigger.create({
+              trigger: ".hero-cta-watch",
+              start: "bottom 60%",
+              onEnter: revealHero,
+              onLeaveBack: darkenHero,
+              once: false,
+            });
+          }
+        }
+
         gsap.fromTo(
           "[data-hero-word]",
           { yPercent: 120, opacity: 0, rotateX: -18 },
@@ -253,6 +360,11 @@ export default function SiteMotion() {
       return () => {
         window.clearTimeout(refreshTimer);
         window.clearInterval(scrollPoll);
+        if (torchRaf) {
+          window.cancelAnimationFrame(torchRaf);
+        }
+        hero?.removeEventListener("mousemove", handleHeroMouseMove);
+        hero?.removeEventListener("mouseleave", closeTorch);
         media?.revert();
         ctx.revert();
         window.removeEventListener("scroll", handleScroll);
@@ -265,6 +377,11 @@ export default function SiteMotion() {
     return () => {
       window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("pointermove", handlePointerMove);
+      if (torchRaf) {
+        window.cancelAnimationFrame(torchRaf);
+      }
+      hero?.removeEventListener("mousemove", handleHeroMouseMove);
+      hero?.removeEventListener("mouseleave", closeTorch);
       window.clearInterval(scrollPoll);
       gsap.ticker.remove(updateLenis);
       lenis?.destroy();

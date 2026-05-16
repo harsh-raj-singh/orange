@@ -150,7 +150,7 @@ export default function Home() {
         </nav>
       </header>
 
-      <section id="top" className="relative overflow-hidden pt-16">
+      <section id="top" className="hero-section relative overflow-hidden pt-16">
         <div className="absolute inset-0">
           <Image
             src="/orange-hero.png"
@@ -165,7 +165,7 @@ export default function Home() {
           <GrainCanvas />
         </div>
 
-        <div className="relative mx-auto grid min-h-[92svh] max-w-7xl gap-10 px-5 py-14 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
+        <div className="relative z-[2] mx-auto grid min-h-[92svh] max-w-7xl gap-10 px-5 py-14 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
           <div className="max-w-3xl">
             <p data-reveal className="mb-5 font-mono text-sm font-semibold uppercase text-[#ff9f5f]">
               Memory fabric for agentic engineering
@@ -181,13 +181,17 @@ export default function Home() {
               Capture developer sessions from Claude Code, Cursor, and MCP. Extract the problems, failed paths, fixes, files, and metadata that future agents need before they start repeating work.
             </p>
             <div data-reveal className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <a className="shimmer-button inline-flex h-12 items-center justify-center rounded-md bg-[#f26d21] px-6 text-sm font-bold text-white shadow-[0_18px_46px_rgba(242,109,33,0.28)] transition hover:scale-[1.02]" href="#story">
+              <a className="hero-cta-watch shimmer-button inline-flex h-12 items-center justify-center rounded-md bg-[#f26d21] px-6 text-sm font-bold text-white shadow-[0_18px_46px_rgba(242,109,33,0.28)] transition hover:scale-[1.02]" href="#story">
                 Watch the flow
               </a>
               <a className="inline-flex h-12 items-center justify-center rounded-md border border-white/20 px-6 text-sm font-bold text-[#fff9ef] transition hover:scale-[1.02] hover:border-[#ff9f5f] hover:text-[#ffb777]" href="#graph">
                 Open graph
               </a>
             </div>
+            <p className="orange-tagline">
+              This is what Orange does —<br />
+              bring light to the collective intelligence of your team.
+            </p>
           </div>
 
           <div className="relative min-h-[560px]">
@@ -239,6 +243,7 @@ export default function Home() {
             </div>
           </div>
         </div>
+        <div className="hero-darkness" aria-hidden="true" />
       </section>
 
       <section className="border-y border-white/10 bg-[#101713]">
