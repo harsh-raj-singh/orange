@@ -5,5 +5,10 @@ pycache/
 *.pyc
 .env
 chroma_db/
+.chroma/
+.mem0/
+.pgdata/
+venv311/
+.venv/
 *.egg-info/
 .pytest_cache/

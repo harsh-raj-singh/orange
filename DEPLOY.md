@@ -8,6 +8,8 @@ The frontend is deployed separately on Vercel. Railway should deploy only the Fa
 uvicorn core.viz_api.main:app --host 0.0.0.0 --port $PORT
 ```
 
+Railway uses `Dockerfile.railway` and `requirements-railway.txt` so the backend deploy does not install the frontend, Streamlit debug tools, Slack bot packages, or GPU/CUDA Torch wheels.
+
 Railway uses `/health` as a lightweight health check:
 
 ```json
