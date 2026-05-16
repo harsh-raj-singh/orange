@@ -20,6 +20,7 @@ def ensure_neo4j_constraints(neo4j: Any) -> None:
     statements = [
         "CREATE CONSTRAINT orange_problem_node_id IF NOT EXISTS FOR (p:Problem) REQUIRE p.node_id IS UNIQUE",
         "CREATE CONSTRAINT orange_solution_node_id IF NOT EXISTS FOR (s:Solution) REQUIRE s.node_id IS UNIQUE",
+        "CREATE CONSTRAINT orange_insight_node_id IF NOT EXISTS FOR (i:Insight) REQUIRE i.node_id IS UNIQUE",
         "CREATE CONSTRAINT orange_session_node_id IF NOT EXISTS FOR (sess:Session) REQUIRE sess.node_id IS UNIQUE",
     ]
     try:

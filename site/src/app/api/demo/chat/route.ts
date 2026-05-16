@@ -45,6 +45,11 @@ type PingContextResponse = {
     scope?: string;
     node_data?: {
       canonical_label?: string;
+      display_label?: string;
+      display_summary?: string;
+      what?: string;
+      why?: string | null;
+      how?: string | null;
       description?: string;
       in_depth_summary?: string;
       error_code?: string | null;
@@ -132,7 +137,11 @@ function buildMemoryContext(memory?: PingContextResponse | null) {
   const nodeIds = memory?.node_ids_used ?? [];
 
   const matches = nodes.map((node, index): MemoryMatch => {
-    const label = node.node_data?.canonical_label ?? `${node.node_type ?? "Memory"} ${index + 1}`;
+    const label =
+      node.node_data?.canonical_label ??
+      node.node_data?.display_label ??
+      node.node_data?.what ??
+      `${node.node_type ?? "Memory"} ${index + 1}`;
 
     return {
       id: nodeIds[index] ?? label,
@@ -146,16 +155,23 @@ function buildMemoryContext(memory?: PingContextResponse | null) {
   const context = nodes
     .map((node, index) => {
       const label = node.node_data?.canonical_label ?? `Memory ${index + 1}`;
+      const resolvedLabel =
+        node.node_data?.canonical_label ??
+        node.node_data?.display_label ??
+        node.node_data?.what ??
+        label;
       const scope = normalizeMemoryScope(node.scope ?? node.source ?? node.node_data?.scope);
       const description =
         node.node_data?.description ??
         node.node_data?.in_depth_summary ??
+        node.node_data?.display_summary ??
+        [node.node_data?.what, node.node_data?.why, node.node_data?.how].filter(Boolean).join(" | ") ??
         "No stored description.";
       const neighborhood = node.neighborhood
         ? `\nNeighborhood: ${JSON.stringify(node.neighborhood).slice(0, 900)}`
         : "";
 
-      return `- ${label} (${node.node_type}, ${scope}, score=${node.similarity_score}): ${description}${neighborhood}`;
+      return `- ${resolvedLabel} (${node.node_type}, ${scope}, score=${node.similarity_score}): ${description}${neighborhood}`;
     })
     .join("\n");
 

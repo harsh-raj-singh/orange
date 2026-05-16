@@ -16,6 +16,7 @@ from core.graph_schema_v2 import (
     Concept,
     ConceptCategory,
     HasProblemEdge,
+    Insight,
     NodeType,
     Problem,
     ProposedForEdge,
@@ -32,6 +33,7 @@ from core.graph_schema_v2 import (
 from core.graph_upsert.dedup import get_or_create_orange_collection, run_dedup
 from core.graph_upsert.embeddings import (
     build_concept_embed_string,
+    build_insight_embed_string,
     build_problem_embed_string,
     build_solution_embed_string,
 )
@@ -42,6 +44,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class UpsertSummary:
     sessions_written: int = 0
+    insights_stored: int = 0
+    insights_skipped: int = 0
     concepts_written: int = 0
     problems_created: int = 0
     problems_merged: int = 0
@@ -71,6 +75,11 @@ def solution_node_id_for(user_id: str, canonical_label: str, attempt_number: int
     return (
         f"solution_{hashlib.sha256(f'{user_id}:{canonical_label}:{attempt_number}'.encode()).hexdigest()[:16]}"
     )
+
+
+def insight_node_id_for(scope_owner: str, session_id: str, display_label: str, what: str) -> str:
+    key = f"{scope_owner}:{session_id}:{display_label}:{what}"
+    return f"insight_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
 
 
 class GraphUpsertEngine:
@@ -322,8 +331,8 @@ class GraphUpsertEngine:
         contributed_by: str | None = None,
     ) -> UpsertSummary:
         """
-        New pipeline writer. Accepts output from Issue Agent + Solution Agent.
-        Old upsert() is untouched - this runs alongside it.
+        DEPRECATED — replaced by insight_extractor for completed-session memory writes.
+        Kept for legacy tests and old graph data migration compatibility.
         """
         summary = UpsertSummary()
         label_to_node_id: dict[str, str] = {}
@@ -495,6 +504,175 @@ class GraphUpsertEngine:
                     )
 
         return summary
+
+    def upsert_insights(
+        self,
+        *,
+        session: Session,
+        user_id: str,
+        insights: list[Insight],
+        scope: str = "user",
+        user_email: str | None = None,
+        contributed_by: str | None = None,
+    ) -> UpsertSummary:
+        summary = UpsertSummary()
+        if not insights:
+            return summary
+
+        scope = "global" if scope == "global" else "user"
+        identity = user_email or user_id
+        self.collection = get_or_create_orange_collection(self.chroma, scope=scope)
+
+        validate_node(session)
+        self._merge_session(
+            session=session,
+            user_id=identity if scope == "user" else "",
+            scope=scope,
+            user_email=user_email,
+            contributed_by=contributed_by,
+        )
+        summary.sessions_written += 1
+
+        for insight in insights:
+            insight.scope = scope
+            insight.user_id = identity if scope == "user" else None
+            insight.user_email = (user_email or identity) if scope == "user" else None
+            insight.contributed_by = contributed_by if scope == "global" else None
+            insight.raw_session_id = insight.raw_session_id or session.node_id
+            if not insight.node_id or insight.node_id.startswith("node_"):
+                owner = "global" if scope == "global" else identity
+                insight.node_id = insight_node_id_for(f"{scope}:{owner}", session.node_id, insight.display_label, insight.what)
+
+            similar = self._find_similar_insight(insight=insight, user_id=identity, scope=scope)
+            if similar and similar["node_id"] == insight.node_id:
+                summary.insights_skipped += 1
+                continue
+
+            self._create_insight(insight=insight, source=session.source)
+            summary.insights_stored += 1
+            self._upsert_chroma_document(
+                node_type="Insight",
+                node_id=insight.node_id,
+                user_id=identity,
+                scope=scope,
+                user_email=user_email,
+                contributed_by=contributed_by,
+                canonical_label=insight.display_label,
+                context_brief=insight.display_summary[:180],
+                document=build_insight_embed_string(insight),
+                source=session.source,
+                outcome=insight.outcome.value if hasattr(insight.outcome, "value") else str(insight.outcome),
+                tags=list(insight.tags),
+            )
+            self._run_edge_direct(
+                from_id=session.node_id,
+                to_id=insight.node_id,
+                edge_type="PRODUCED",
+                properties={},
+                scope=scope,
+                summary=summary,
+            )
+            if similar and similar["node_id"] != insight.node_id:
+                self._run_edge_direct(
+                    from_id=insight.node_id,
+                    to_id=similar["node_id"],
+                    edge_type="SIMILAR_TO",
+                    properties={"similarity_score": similar["similarity_score"]},
+                    scope=scope,
+                    summary=summary,
+                )
+                summary.similar_to_edges_written += 1
+
+        return summary
+
+    def _create_insight(self, *, insight: Insight, source: SourceType | str) -> str:
+        self._run_neo4j(
+            """
+            MERGE (i:Insight {node_id: $node_id, scope: $scope})
+            SET i.node_type        = 'Insight',
+                i.user_id          = $user_id,
+                i.user_email       = $user_email,
+                i.contributed_by   = $contributed_by,
+                i.what             = $what,
+                i.why              = $why,
+                i.how              = $how,
+                i.outcome          = $outcome,
+                i.tags             = $tags,
+                i.display_label    = $display_label,
+                i.display_summary  = $display_summary,
+                i.raw_description  = $raw_description,
+                i.raw_session_id   = $raw_session_id,
+                i.source           = $source,
+                i.extraction_version = $extraction_version,
+                i.created_at       = coalesce(i.created_at, datetime()),
+                i.updated_at       = datetime()
+            RETURN i.node_id AS node_id
+            """,
+            node_id=insight.node_id,
+            scope=insight.scope,
+            user_id=insight.user_id,
+            user_email=insight.user_email,
+            contributed_by=insight.contributed_by,
+            what=insight.what,
+            why=insight.why,
+            how=insight.how,
+            outcome=insight.outcome.value if hasattr(insight.outcome, "value") else str(insight.outcome),
+            tags=list(insight.tags),
+            display_label=insight.display_label,
+            display_summary=insight.display_summary,
+            raw_description="\n".join(part for part in [insight.what, insight.why or "", insight.how or ""] if part),
+            raw_session_id=insight.raw_session_id,
+            source=_source_value(source),
+            extraction_version=insight.extraction_version,
+        )
+        return insight.node_id
+
+    def _find_similar_insight(
+        self,
+        *,
+        insight: Insight,
+        user_id: str,
+        scope: str = "user",
+        threshold: float = 0.88,
+    ) -> dict[str, Any] | None:
+        document = build_insight_embed_string(insight)
+        if not document:
+            return None
+
+        where = {"node_type": "Insight", "scope": "global"} if scope == "global" else {
+            "node_type": "Insight",
+            "scope": "user",
+            "user_id": user_id,
+        }
+        try:
+            result = self.collection.query(query_texts=[document], n_results=3, where=where)
+        except Exception:  # noqa: BLE001
+            return None
+
+        ids = (result or {}).get("ids") or [[]]
+        distances = (result or {}).get("distances") or [[]]
+        metadatas = (result or {}).get("metadatas") or [[]]
+        for vector_id, distance, metadata in zip(
+            ids[0] if ids else [],
+            distances[0] if distances else [],
+            metadatas[0] if metadatas else [],
+        ):
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("node_type") != "Insight" or metadata.get("scope") != scope:
+                continue
+            if scope == "user" and metadata.get("user_id") != user_id:
+                continue
+            try:
+                similarity_score = round(1.0 - float(distance), 4)
+            except Exception:  # noqa: BLE001
+                continue
+            if similarity_score >= threshold:
+                return {
+                    "node_id": str(metadata.get("neo4j_node_id") or metadata.get("node_id") or vector_id),
+                    "similarity_score": similarity_score,
+                }
+        return None
 
     def _find_similar_problem_v2(
         self,
@@ -1120,10 +1298,13 @@ class GraphUpsertEngine:
         scope: str = "user",
         user_email: str | None = None,
         contributed_by: str | None = None,
+        outcome: str | None = None,
+        tags: list[str] | None = None,
     ) -> None:
         metadata = {
             "node_type": node_type,
             "scope": scope,
+            "node_id": node_id,
             "neo4j_node_id": node_id,
             "canonical_label": canonical_label,
             "context_brief": context_brief,
@@ -1137,6 +1318,11 @@ class GraphUpsertEngine:
             metadata["source"] = _source_value(source)
         if parent_problem_id:
             metadata["parent_problem_id"] = parent_problem_id
+        if outcome:
+            metadata["outcome"] = outcome
+        if tags is not None:
+            # Chroma metadata values must be scalar; keep graph tags as lists on Neo4j.
+            metadata["tags"] = ",".join(tags)
 
         vector_id = f"{node_type.lower()}_{node_id}"
 

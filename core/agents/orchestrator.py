@@ -3,35 +3,22 @@ Entry point for post-chat extraction pipeline.
 Called when user marks a chat as complete.
 
 Execution order:
-1. Solution Agent runs first (Issue Agent needs its output for context stitching)
-2. Issue Agent runs with solution output injected
-3. upsert_v2 writes everything to Neo4j
+1. Triage Agent decides whether the completed session produced durable knowledge
+2. Insight Extractor reads the full session transcript
+3. upsert_insights writes unified Insight nodes to Neo4j + Chroma
 """
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from core.agents.issue_agent.prompts import ISSUE_AGENT_GLOBAL_SCOPE_PROMPT, ISSUE_AGENT_USER_SCOPE_PROMPT
-from core.agents.issue_agent.runner import run_issue_agent
+from core.agents.insight_extractor import extract_insights
 from core.agents.pii_scrubber import scrub_pii_transcript
-from core.agents.prompt_scope import scoped_extraction_prompt
-from core.agents.solution_agent.prompts import (
-    SOLUTION_AGENT_GLOBAL_SCOPE_PROMPT,
-    SOLUTION_AGENT_USER_SCOPE_PROMPT,
-)
-from core.agents.solution_agent.runner import run_solution_agent
-from core.agents.summarizer import summarize_extraction_outputs
+from core.agents.triage import run_triage_agent
 from core.ingestion import NormalizedSession, SessionIngestionRequest, normalize_ingestion_request
 from core.graph_upsert.writer import GraphUpsertEngine
-from core.graph_schema_v2 import Session, SourceType
+from core.graph_schema_v2 import Insight, InsightOutcome, Session, SourceType
 
 logger = logging.getLogger(__name__)
-
-
-def _select_scope_prompts(scope: str) -> tuple[str, str]:
-    if scope == "global":
-        return SOLUTION_AGENT_GLOBAL_SCOPE_PROMPT, ISSUE_AGENT_GLOBAL_SCOPE_PROMPT
-    return SOLUTION_AGENT_USER_SCOPE_PROMPT, ISSUE_AGENT_USER_SCOPE_PROMPT
 
 
 def _session_node_from_normalized(scoped_session: NormalizedSession, summary: str) -> Session:
@@ -75,6 +62,13 @@ def _global_session_from(normalized: NormalizedSession, scrubbed_transcript: str
     )
 
 
+def _insight_outcome(value: str) -> InsightOutcome:
+    try:
+        return InsightOutcome(str(value or "").strip().lower())
+    except ValueError:
+        return InsightOutcome.EXPLORATORY
+
+
 async def _run_for_scope(
     *,
     scoped_session: NormalizedSession,
@@ -85,51 +79,71 @@ async def _run_for_scope(
     chroma_client: Any,
     user_email: str | None = None,
     contributed_by: str | None = None,
-) -> tuple[dict[str, int], list[str]]:
+    run_triage: bool = True,
+) -> tuple[dict[str, int | str | None], list[str]]:
     scoped_errors: list[str] = []
     scoped_session_id = scoped_session.session_id
-    solution_prompt, issue_prompt = _select_scope_prompts(scope)
 
-    with scoped_extraction_prompt(solution_prompt):
-        solution_output = await run_solution_agent(scoped_session_id, scoped_transcript)
+    if run_triage:
+        try:
+            triage = await run_triage_agent(scoped_transcript)
+        except Exception as exc:
+            logger.error("triage_agent_failed", extra={"session_id": scoped_session_id, "error": str(exc)})
+            scoped_errors.append(f"Triage agent failed: {exc}")
+            return {"insights_stored": 0, "edges_written": 0, "skipped_reason": "triage failed"}, scoped_errors
 
-    try:
-        with scoped_extraction_prompt(issue_prompt):
-            issue_output = await run_issue_agent(
-                session_id=scoped_session_id,
-                transcript=scoped_transcript,
-                solution_output=solution_output,
+        if not triage.worth_storing:
+            logger.info(
+                "store_session_triage_skipped",
+                extra={"session_id": scoped_session_id, "scope": scope, "reason": triage.reason},
             )
-    except Exception as exc:
-        logger.error("issue_agent_failed", extra={"session_id": scoped_session_id, "error": str(exc)})
-        scoped_errors.append(f"Issue agent failed: {exc}")
-        return {"problems_created": 0, "solutions_written": 0, "edges_written": 0}, scoped_errors
+            return {"insights_stored": 0, "edges_written": 0, "skipped_reason": triage.reason}, scoped_errors
 
-    try:
-        issue_output, solution_output = await summarize_extraction_outputs(issue_output, solution_output)
-    except Exception as exc:
-        logger.warning("summarizer_failed_continuing", extra={"session_id": scoped_session_id, "error": str(exc)})
+    drafts = await extract_insights(scoped_transcript)
+    if not drafts:
+        reason = "Insight extractor returned no durable insights."
+        logger.info("store_session_insights_empty", extra={"session_id": scoped_session_id, "scope": scope})
+        return {"insights_stored": 0, "edges_written": 0, "skipped_reason": reason}, scoped_errors
+
+    session = _session_node_from_normalized(scoped_session, scoped_transcript)
+    insights = [
+        Insight(
+            scope="global" if scope == "global" else "user",
+            user_id=scoped_user_id if scope == "user" else None,
+            user_email=user_email if scope == "user" else None,
+            contributed_by=contributed_by if scope == "global" else None,
+            what=draft.what,
+            why=draft.why,
+            how=draft.how,
+            outcome=_insight_outcome(draft.outcome),
+            tags=list(draft.tags or []),
+            display_label=draft.display_label,
+            display_summary=draft.display_summary,
+            raw_session_id=session.node_id,
+            source=session.source,
+        )
+        for draft in drafts
+    ]
 
     try:
         engine = GraphUpsertEngine(neo4j=neo4j_client, chroma=chroma_client)
-        summary = engine.upsert_v2(
-            session=_session_node_from_normalized(scoped_session, scoped_transcript),
+        summary = engine.upsert_insights(
+            session=session,
             user_id=scoped_user_id,
-            issue_output=issue_output,
-            solution_output=solution_output,
+            insights=insights,
             scope=scope,
             user_email=user_email,
             contributed_by=contributed_by,
         )
     except Exception as exc:
-        logger.error("upsert_v2_failed", extra={"session_id": scoped_session_id, "error": str(exc)})
+        logger.error("upsert_insights_failed", extra={"session_id": scoped_session_id, "error": str(exc)})
         scoped_errors.append(f"Writer failed: {exc}")
-        return {"problems_created": 0, "solutions_written": 0, "edges_written": 0}, scoped_errors
+        return {"insights_stored": 0, "edges_written": 0, "skipped_reason": "writer failed"}, scoped_errors
 
     return {
-        "problems_created": summary.problems_created,
-        "solutions_written": summary.solutions_written,
+        "insights_stored": summary.insights_stored,
         "edges_written": summary.edges_written,
+        "skipped_reason": None,
     }, scoped_errors
 
 
@@ -157,7 +171,7 @@ async def run_extraction_pipeline(
         chroma_client:   Chroma client instance
 
     Returns:
-        dict with keys: problems_created, solutions_written, edges_written, errors
+        dict with keys: insights_stored, skipped_reason, edges_written, errors
     """
 
     errors = []
@@ -184,7 +198,19 @@ async def run_extraction_pipeline(
     if errors:
         return {**user_summary, "errors": errors}
 
-    global_summary: dict[str, int] | None = None
+    if not user_summary.get("insights_stored"):
+        return {
+            "insights_stored": 0,
+            "skipped_reason": user_summary.get("skipped_reason"),
+            "edges_written": user_summary.get("edges_written", 0),
+            "global": None,
+            "errors": errors,
+            "problems_created": 0,
+            "problems_merged": 0,
+            "solutions_written": 0,
+        }
+
+    global_summary: dict[str, int | str | None] | None = None
     if contribute_to_global:
         pii_values = [value for value in [normalized.user_id, normalized.user_email, *normalized.participant_ids] if value]
         if known_pii:
@@ -198,6 +224,7 @@ async def run_extraction_pipeline(
             neo4j_client=neo4j_client,
             chroma_client=chroma_client,
             contributed_by=normalized.user_email or normalized.user_id,
+            run_triage=False,
         )
         errors.extend(f"Global {error}" for error in global_errors)
 
@@ -205,4 +232,7 @@ async def run_extraction_pipeline(
         **user_summary,
         "global": global_summary,
         "errors": errors,
+        "problems_created": 0,
+        "problems_merged": 0,
+        "solutions_written": 0,
     }

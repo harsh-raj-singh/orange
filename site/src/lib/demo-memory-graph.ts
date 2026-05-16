@@ -1,4 +1,5 @@
 export type DemoMemoryNodeType =
+  | "Insight"
   | "Problem"
   | "Solution"
   | "Attempt"
@@ -27,6 +28,8 @@ export type DemoMemoryNode = {
     repo?: string;
     createdAt: string;
     status?: "open" | "resolved" | "failed" | "active";
+    outcome?: "resolved" | "exploratory" | "partial" | "abandoned";
+    tags?: string[];
   };
 };
 
@@ -45,6 +48,11 @@ export type DemoMemoryNodeDetail = DemoMemoryNode & {
     evidence: string[];
     relatedFiles: string[];
     nextActions: string[];
+    what?: string;
+    why?: string | null;
+    how?: string | null;
+    outcome?: string;
+    tags?: string[];
   };
 };
 

@@ -7,6 +7,7 @@ from core.graph_upsert.dedup import (
 )
 from core.graph_upsert.embeddings import (
     build_concept_embed_string,
+    build_insight_embed_string,
     build_problem_embed_string,
     build_solution_embed_string,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "ORANGE_USER_VECTOR_COLLECTION",
     "UpsertSummary",
     "build_concept_embed_string",
+    "build_insight_embed_string",
     "build_problem_embed_string",
     "build_solution_embed_string",
     "content_hash",

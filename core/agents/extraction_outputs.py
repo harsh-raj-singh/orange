@@ -80,3 +80,18 @@ class IssueAgentOutput(BaseModel):
 class SolutionAgentOutput(BaseModel):
     session_id: str
     solutions: list[ExtractedSolution]  # ordered by applied_turn
+
+
+class TriageDecision(BaseModel):
+    worth_storing: bool
+    reason: str
+
+
+class InsightDraft(BaseModel):
+    what: str
+    why: str | None = None
+    how: str | None = None
+    outcome: str = "exploratory"
+    tags: list[str] = Field(default_factory=list)
+    display_label: str
+    display_summary: str

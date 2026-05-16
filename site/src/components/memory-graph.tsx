@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type MemoryNode = {
   id: string;
   label: string;
-  kind: "Problem" | "Attempt" | "Solution" | "Artifact" | "Concept" | "Session";
+  kind: "Insight" | "Problem" | "Attempt" | "Solution" | "Artifact" | "Concept" | "Session";
   x: number;
   y: number;
   summary: string;
@@ -16,10 +16,17 @@ type MemoryNode = {
     createdAt?: string;
     status?: string;
     scope?: MemoryScopeValue;
+    outcome?: InsightOutcomeValue;
+    tags?: string[];
   };
   detailTitle?: string;
   detailBody?: string;
   rawContext?: string;
+  what?: string;
+  why?: string | null;
+  how?: string | null;
+  outcome?: InsightOutcomeValue;
+  tags?: string[];
   evidence?: string[];
   relatedFiles?: string[];
   nextActions?: string[];
@@ -27,6 +34,7 @@ type MemoryNode = {
 
 type MemoryScopeValue = "user" | "global";
 type MemoryScopeFilter = MemoryScopeValue | "both";
+type InsightOutcomeValue = "resolved" | "exploratory" | "partial" | "abandoned";
 
 type MemoryEdge = {
   id: string;
@@ -110,12 +118,20 @@ const visibleFallbackEdges = fallbackEdges.filter(
 );
 
 const kindClass: Record<MemoryNode["kind"], string> = {
+  Insight: "border-[#2f7f78] bg-[#eefbf8] text-[#1f5d58]",
   Problem: "border-[#c5551c] bg-[#fff8ec] text-[#8f3b14]",
   Attempt: "border-[#c3a46b] bg-[#fffdf6] text-[#6d5421]",
   Solution: "border-[#2f6f5e] bg-[#f1faf5] text-[#205545]",
   Artifact: "border-[#5f746b] bg-[#f7f9f6] text-[#344740]",
   Concept: "border-[#839a8d] bg-white text-[#40554b]",
   Session: "border-[#24352d] bg-[#f6f7f4] text-[#24352d]",
+};
+
+const outcomeClass: Record<InsightOutcomeValue, string> = {
+  resolved: "bg-[#f1faf5] text-[#2f6f5e]",
+  exploratory: "bg-[#eef6ff] text-[#2f5f8f]",
+  partial: "bg-[#fff8ec] text-[#9a5c16]",
+  abandoned: "bg-[#f3f4f2] text-[#5f6a64]",
 };
 
 const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
@@ -138,7 +154,16 @@ function asString(value: unknown) {
 }
 
 function asStringArray(value: unknown) {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return undefined;
 }
 
 function asNumber(value: unknown) {
@@ -147,6 +172,12 @@ function asNumber(value: unknown) {
 
 function normalizeScope(value: unknown): MemoryScopeValue {
   return value === "global" || value === "shared" ? "global" : "user";
+}
+
+function normalizeOutcome(value: unknown): InsightOutcomeValue | undefined {
+  return value === "resolved" || value === "exploratory" || value === "partial" || value === "abandoned"
+    ? value
+    : undefined;
 }
 
 function truncateLabel(value: string, maxLength = 30) {
@@ -224,10 +255,14 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
         createdAt: asString(value.metadata.createdAt),
         status: asString(value.metadata.status),
         scope: normalizeScope(value.metadata.scope),
+        outcome: normalizeOutcome(value.metadata.outcome),
+        tags: asStringArray(value.metadata.tags),
       }
     : existing?.metadata;
   const detailBody = asString(value.detail) ?? asString(detail?.body) ?? existing?.detailBody;
   const rawContext = asString(detail?.fullContext) ?? asString(detail?.rawDescription) ?? existing?.rawContext;
+  const tags = asStringArray(detail?.tags) ?? metadata?.tags ?? existing?.tags;
+  const outcome = normalizeOutcome(detail?.outcome) ?? metadata?.outcome ?? existing?.outcome;
 
   return {
     id,
@@ -241,6 +276,11 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
     detailTitle: asString(detail?.title) ?? existing?.detailTitle,
     detailBody,
     rawContext,
+    what: asString(detail?.what) ?? existing?.what,
+    why: asString(detail?.why) ?? existing?.why,
+    how: asString(detail?.how) ?? existing?.how,
+    outcome,
+    tags,
     evidence: asStringArray(detail?.evidence) ?? existing?.evidence,
     relatedFiles: asStringArray(detail?.relatedFiles) ?? existing?.relatedFiles,
     nextActions: asStringArray(detail?.nextActions) ?? existing?.nextActions,
@@ -706,7 +746,12 @@ export default function MemoryGraph() {
           ) : null}
           {selectedNode?.score ? (
             <span className="rounded-full bg-[#f7f9f6] px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#5f746b]">
-              {Math.round(selectedNode.score * 100)}%
+                  {Math.round(selectedNode.score * 100)}%
+            </span>
+          ) : null}
+          {selectedNode?.outcome ? (
+            <span className={`rounded-full px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] ${outcomeClass[selectedNode.outcome]}`}>
+              {selectedNode.outcome}
             </span>
           ) : null}
           <span
@@ -718,6 +763,40 @@ export default function MemoryGraph() {
           </span>
         </div>
         <p className="mt-5 text-sm leading-6 text-[#536057]">{selectedNode?.summary}</p>
+        {selectedNode?.kind === "Insight" ? (
+          <dl className="mt-5 grid gap-3 rounded-md border border-[#2f7f78]/10 bg-[#eefbf8] p-4 text-sm text-[#38514d]">
+            {selectedNode.what ? (
+              <div>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#2f7f78]">What</dt>
+                <dd className="mt-1 leading-6">{selectedNode.what}</dd>
+              </div>
+            ) : null}
+            {selectedNode.why ? (
+              <div>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#2f7f78]">Why</dt>
+                <dd className="mt-1 leading-6">{selectedNode.why}</dd>
+              </div>
+            ) : null}
+            {selectedNode.how ? (
+              <div>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#2f7f78]">How</dt>
+                <dd className="mt-1 leading-6">{selectedNode.how}</dd>
+              </div>
+            ) : null}
+            {selectedNode.tags?.length ? (
+              <div>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#2f7f78]">Tags</dt>
+                <dd className="mt-2 flex flex-wrap gap-2">
+                  {selectedNode.tags.map((tag) => (
+                    <span key={tag} className="rounded-full bg-white px-2.5 py-1 font-mono text-xs font-semibold text-[#2f7f78]">
+                      {tag}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : null}
         {selectedScope === "global" ? (
           <p className="mt-3 rounded-md border border-[#6f61b5]/15 bg-[#f5f2ff] px-3 py-2 text-sm leading-6 text-[#55479a]">
             Contributed anonymously from shared sessions

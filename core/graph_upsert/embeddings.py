@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.graph_schema_v2 import Concept, Problem, Solution
+from core.graph_schema_v2 import Concept, Insight, Problem, Solution
 
 
 def build_problem_embed_string(problem: Problem) -> str:
@@ -19,3 +19,15 @@ def build_concept_embed_string(concept: Concept) -> str:
     """Concept labels are coarse-grained enough to embed directly."""
 
     return concept.canonical_label
+
+
+def build_insight_embed_string(insight: Insight) -> str:
+    """Embed the full technical learning, not just the display copy."""
+
+    parts = [
+        insight.what,
+        insight.why or "",
+        insight.how or "",
+        " ".join(insight.tags),
+    ]
+    return " ".join(part.strip() for part in parts if part and part.strip()).strip()

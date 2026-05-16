@@ -145,6 +145,32 @@ def _fetch_solution_node(neo4j, node_id: str) -> dict | None:
     )
 
 
+def _fetch_insight_node(neo4j, node_id: str) -> dict | None:
+    return _single_record(
+        _run_neo4j(
+            neo4j,
+            """
+        MATCH (i:Insight {node_id: $node_id})
+        OPTIONAL MATCH (session:Session)-[:PRODUCED]->(i)
+        OPTIONAL MATCH (i)-[:SIMILAR_TO]->(similar:Insight)
+        RETURN
+          i.display_label AS display_label,
+          i.display_summary AS display_summary,
+          i.what AS what,
+          i.why AS why,
+          i.how AS how,
+          i.outcome AS outcome,
+          i.tags AS tags,
+          i.raw_session_id AS raw_session_id,
+          session.title AS session_title,
+          session.summary AS session_summary,
+          collect(DISTINCT similar.display_label) AS similar_insights
+        """,
+            node_id=node_id,
+        )
+    )
+
+
 async def handle_ping_context(
     req: PingContextRequest, *, neo4j: object, chroma: object
 ) -> PingContextResponse:
@@ -216,6 +242,14 @@ async def handle_ping_context(
                 "refined_from",
                 "refined_into",
             ]
+        elif node_type == "Insight":
+            row = _fetch_insight_node(neo4j, node_id=neo4j_node_id)
+            neighborhood_keys = [
+                "raw_session_id",
+                "session_title",
+                "session_summary",
+                "similar_insights",
+            ]
         else:
             continue
 
@@ -228,7 +262,13 @@ async def handle_ping_context(
             for k, v in row.items()
             if k not in neighborhood_keys and not (vector_scope == "global" and k == "contributed_by")
         }
-        label_key = str(node_data.get("canonical_label") or metadata.get("canonical_label") or "").strip().lower()
+        label_key = str(
+            node_data.get("canonical_label")
+            or node_data.get("display_label")
+            or node_data.get("what")
+            or metadata.get("canonical_label")
+            or ""
+        ).strip().lower()
         existing_match = by_label.get(label_key) if label_key else None
         if existing_match is not None:
             if existing_match.source == "user" and vector_scope == "global":
@@ -445,6 +485,8 @@ async def handle_store_session(
         problems_created=result.get("problems_created", 0),
         problems_merged=result.get("problems_merged", 0),
         solutions_written=result.get("solutions_written", 0),
+        insights_stored=result.get("insights_stored", 0),
+        skipped_reason=result.get("skipped_reason"),
         errors=list(result.get("errors") or []),
     )
     _STORE_SESSION_CACHE[cache_key] = response

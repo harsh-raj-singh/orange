@@ -57,9 +57,11 @@ class StoreSessionRequest:
 @dataclass
 class StoreSessionResponse:
     session_id: str
-    problems_created: int
-    problems_merged: int
-    solutions_written: int
+    problems_created: int = 0
+    problems_merged: int = 0
+    solutions_written: int = 0
+    insights_stored: int = 0
+    skipped_reason: str | None = None
     errors: list[str] = field(default_factory=list)
 
 

@@ -37,6 +37,9 @@ function compactText(value: string, maxLength: number) {
 }
 
 function statusFor(label?: string): DemoMemoryNode["metadata"]["status"] {
+  if (label === "Insight") {
+    return "active";
+  }
   if (label === "Solution") {
     return "resolved";
   }
@@ -49,6 +52,7 @@ function statusFor(label?: string): DemoMemoryNode["metadata"]["status"] {
 function nodeTypeFor(label?: string): DemoMemoryNodeType {
   if (
     label === "Problem" ||
+    label === "Insight" ||
     label === "Solution" ||
     label === "Attempt" ||
     label === "Artifact" ||
@@ -75,6 +79,7 @@ function isIdentityLike(node: BackendNode) {
   const properties = node.properties ?? {};
   const rawType = backendNodeType(node).toLowerCase();
   const knowledgeTypes = new Set(["problem", "solution", "attempt", "artifact", "concept"]);
+  knowledgeTypes.add("insight");
 
   if (rawType === "session" || rawType === "user") {
     return true;
@@ -100,6 +105,19 @@ function isIdentityLike(node: BackendNode) {
 
   const name = asString(properties.name) ?? asString(properties.full_name);
   return Boolean(name && !asString(properties.canonical_label) && rawType !== "concept");
+}
+
+function asStringArray(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return undefined;
 }
 
 function scopeFor(properties: Record<string, unknown>, fallback: MemoryScope) {
@@ -145,8 +163,11 @@ export function transformBackendGraph(graph: BackendGraph, requestedScope: Memor
         "Stored Orange memory.";
       const rawDescription =
         asString(properties.raw_description) ??
+        asString(properties.what) ??
         asString(properties.description) ??
         asString(properties.in_depth_summary);
+      const outcome = asString(properties.outcome);
+      const tags = asStringArray(properties.tags);
 
       return {
         id,
@@ -162,6 +183,11 @@ export function transformBackendGraph(graph: BackendGraph, requestedScope: Memor
             asString(properties.ingested_at) ??
             new Date().toISOString(),
           status: statusFor(nodeType),
+          outcome:
+            outcome === "resolved" || outcome === "exploratory" || outcome === "partial" || outcome === "abandoned"
+              ? outcome
+              : undefined,
+          tags,
           scope,
         } as DemoMemoryNode["metadata"] & { scope: Exclude<MemoryScope, "both"> },
         detail: rawDescription
@@ -169,6 +195,11 @@ export function transformBackendGraph(graph: BackendGraph, requestedScope: Memor
               title: compactText(label, 72),
               body: compactText(summary, 220),
               fullContext: rawDescription,
+              what: asString(properties.what),
+              why: asString(properties.why) ?? null,
+              how: asString(properties.how) ?? null,
+              outcome,
+              tags,
             }
           : undefined,
       } as DemoMemoryNode & {

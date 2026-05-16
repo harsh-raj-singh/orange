@@ -25,6 +25,7 @@ def _new_node_id() -> str:
 
 class NodeType(str, Enum):
     SESSION = "session"
+    INSIGHT = "insight"
     PROBLEM = "problem"
     SOLUTION = "solution"
     CONCEPT = "concept"
@@ -117,6 +118,13 @@ class SolutionOutcome(str, Enum):
     FAILED = "failed"  # tried, did not work
     UNTRIED = "untried"  # suggested but not applied
     CAUSED_NEW_PROBLEM = "caused_new_problem"  # attempt introduced a new error
+
+
+class InsightOutcome(str, Enum):
+    RESOLVED = "resolved"
+    EXPLORATORY = "exploratory"
+    PARTIAL = "partial"
+    ABANDONED = "abandoned"
 
 
 class NodeBase(BaseModel):
@@ -376,6 +384,63 @@ class Solution(NodeBase):
     )
 
 
+class Insight(NodeBase):
+    """Unified durable memory node produced at completed-session scope."""
+
+    node_type: Literal[NodeType.INSIGHT] = Field(
+        default=NodeType.INSIGHT,
+        description="Fixed discriminator for insight nodes.",
+    )
+    scope: Literal["user", "global"] = Field(
+        default="user",
+        description="Private user memory or shared sanitized global knowledge.",
+    )
+    user_id: str | None = Field(
+        default=None,
+        description="Email identity for user-scoped insights. Null for global insights.",
+    )
+    user_email: str | None = Field(
+        default=None,
+        description="Human-readable owner email for user-scoped lookup.",
+    )
+    contributed_by: str | None = Field(
+        default=None,
+        description="Audit-only contributor email for global insights. Never exposed in shared retrieval.",
+    )
+    what: str = Field(
+        default="",
+        description="Situation, question, or problem captured by the insight.",
+    )
+    why: str | None = Field(
+        default=None,
+        description="Root cause or reason, if discovered.",
+    )
+    how: str | None = Field(
+        default=None,
+        description="What was tried, done, or resolved.",
+    )
+    outcome: InsightOutcome = Field(
+        default=InsightOutcome.EXPLORATORY,
+        description="Outcome classification for graph display and retrieval.",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Specific technical/domain tags used for retrieval.",
+    )
+    display_label: str = Field(
+        default="",
+        description="Compact graph card label.",
+    )
+    display_summary: str = Field(
+        default="",
+        description="Compact graph card summary.",
+    )
+    raw_session_id: str = Field(
+        default="",
+        description="Session node id that produced this insight.",
+    )
+
+
 class Concept(NodeBase):
     """Knowledge node for reusable technologies, domains, protocols, and abstractions."""
 
@@ -443,6 +508,7 @@ class EdgeType(str, Enum):
     TRIED_IN = "TRIED_IN"
     RELATED_TO = "RELATED_TO"
     SIMILAR_TO = "SIMILAR_TO"
+    PRODUCED = "PRODUCED"
 
     # new
     CAUSED_BY = "CAUSED_BY"  # Problem → Problem (child caused by parent's attempted fix)
@@ -600,6 +666,7 @@ EdgeModel = Union[
 
 _NODE_TYPE_BY_MODEL = {
     Session: NodeType.SESSION,
+    Insight: NodeType.INSIGHT,
     Problem: NodeType.PROBLEM,
     Solution: NodeType.SOLUTION,
     Concept: NodeType.CONCEPT,
@@ -631,6 +698,10 @@ _ALLOWED_EDGE_DIRECTIONS: dict[EdgeType, set[tuple[NodeType, NodeType]]] = {
     },
     EdgeType.SIMILAR_TO: {
         (NodeType.PROBLEM, NodeType.PROBLEM),
+        (NodeType.INSIGHT, NodeType.INSIGHT),
+    },
+    EdgeType.PRODUCED: {
+        (NodeType.SESSION, NodeType.INSIGHT),
     },
     EdgeType.CAUSED_BY: {
         (NodeType.PROBLEM, NodeType.PROBLEM),
@@ -655,7 +726,7 @@ def _node_type_for_instance(node: BaseModel) -> NodeType:
         if isinstance(node, model_cls):
             return node_type
     raise ValueError(
-        "Unsupported node model. Expected one of: Session, Problem, Solution, Concept, Artifact."
+        "Unsupported node model. Expected one of: Session, Insight, Problem, Solution, Concept, Artifact."
     )
 
 
@@ -671,6 +742,12 @@ def validate_node(node: BaseModel) -> None:
         label = getattr(node, "canonical_label")
         if not isinstance(label, str) or not label.strip():
             raise ValueError(f"{node_type.value}.canonical_label is required and must be non-empty.")
+
+    if isinstance(node, Insight):
+        if not node.what.strip():
+            raise ValueError("Insight.what is required and must be non-empty.")
+        if not node.display_label.strip():
+            raise ValueError("Insight.display_label is required and must be non-empty.")
 
     if isinstance(node, Session):
         if node.ended_at is not None and node.ended_at < node.started_at:
