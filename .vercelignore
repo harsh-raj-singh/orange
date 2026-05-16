@@ -1,0 +1,14 @@
+.chroma
+.claude
+.mem0
+.pgdata
+.pytest_cache
+chroma_db
+venv311
+node_modules
+site/node_modules
+site/.next
+site/.vercel
+.playwright-mcp
+__pycache__
+*.pyc
