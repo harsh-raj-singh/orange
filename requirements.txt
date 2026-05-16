@@ -1,6 +1,5 @@
 # Core dependencies
 python-dotenv==1.0.1  # Environment variables
-requests==2.32.3  # Upstash REST API
 psycopg[binary]==3.2.5  # Local Postgres client
 psycopg_pool==3.2.4  # Connection pooling
 
@@ -11,25 +10,22 @@ mem0ai==1.0.3
 streamlit==1.40.1
 
 # Viz API
-fastapi>=0.110.0
-uvicorn>=0.29.0
+fastapi==0.110.1
+uvicorn==0.40.0
 
 # Explicit pins for local embeddings + vector + graph support
 sentence-transformers==5.0.0
 chromadb==0.4.24
-langchain-memgraph==0.1.0
-rank-bm25==0.2.2
 neo4j==5.25.0
 
 # NVIDIA/OpenAI client (mem0 already depends on OpenAI)
-openai>=1.90.0
-dspy-ai>=2.6.0
+openai==2.15.0
+dspy-ai==3.2.1
 numpy==1.26.4
 
 # Development
 pytest==8.3.4  # Testing
-black==24.10.0  # Code formatting
 
 # Slack Integration
-slack-bolt>=1.18.0
-slack-sdk>=3.27.0
+slack-bolt==1.27.0
+slack-sdk==3.40.1
