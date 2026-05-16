@@ -46,69 +46,122 @@ type MemoryEdge = {
 
 const memoryNodes: MemoryNode[] = [
   {
-    id: "cors",
-    label: "CORS preflight fails",
-    kind: "Problem",
+    id: "cors-insight",
+    label: "FastAPI CORS middleware order",
+    kind: "Insight",
     x: 18,
     y: 28,
-    summary: "OPTIONS requests returned 405 after a router refactor.",
-    detailBody: "Orange keeps the failure mode connected to the final middleware ordering fix, so a later agent can skip repeating origin-list changes.",
+    summary: "OPTIONS requests returned 405 because CORS middleware was registered after routes.",
+    detailBody: "A later agent can retrieve the ordering decision before changing origin lists again.",
+    what: "FastAPI CORS preflight returned 405 after router setup changed.",
+    why: "CORSMiddleware was mounted after route registration.",
+    how: "Move CORSMiddleware before include_router.",
+    outcome: "resolved",
+    tags: ["fastapi", "cors", "middleware-order"],
+    metadata: {
+      owner: "harsh@example.com",
+      repo: "orange-backend",
+      status: "active",
+      scope: "user",
+      outcome: "resolved",
+      tags: ["fastapi", "cors", "middleware-order"],
+    },
   },
   {
-    id: "middleware",
-    label: "Middleware ordering",
-    kind: "Concept",
+    id: "spain-gtm",
+    label: "Spain GTM decision context",
+    kind: "Insight",
     x: 43,
     y: 18,
-    summary: "FastAPI middleware must wrap routes before handlers are mounted.",
-    detailBody: "This concept links several sessions where registration order changed runtime behavior without changing endpoint code.",
+    summary: "Slack decision context is stored as company memory without exposing private attribution.",
+    detailBody: "Orange can answer what the team decided weeks later by connecting chat fragments to a company-scoped insight.",
+    what: "Team asked what was decided with Rohan about GTM in Spain.",
+    why: "Important go-to-market decisions live in chat and disappear from working memory.",
+    how: "Store the decision as company-scoped memory retrievable from Slack-like questions.",
+    outcome: "exploratory",
+    tags: ["slack", "gtm", "company-memory"],
+    metadata: {
+      owner: "Orange",
+      repo: "company-memory",
+      status: "active",
+      scope: "global",
+      outcome: "exploratory",
+      tags: ["slack", "gtm", "company-memory"],
+    },
   },
   {
-    id: "allowed-origins",
-    label: "Origin list edit",
-    kind: "Attempt",
+    id: "markdown-memory",
+    label: "Company uses Markdown memory",
+    kind: "Insight",
     x: 28,
     y: 62,
-    summary: "Expanded allowed origins, but preflight still failed.",
-    detailBody: "A stored failed attempt is useful context because it tells the next engineer which plausible fix already burned time.",
+    summary: "Company knowledge often lives in Markdown files, so Orange should preserve those facts as scoped memory.",
+    detailBody: "This is a company-level fact that helps future agents understand where durable documentation already lives.",
+    what: "Company uses .md files for memory.",
+    why: "Agents should look for Markdown knowledge before inventing new documentation patterns.",
+    how: "Store as company-scoped fact and connect related docs or sessions.",
+    outcome: "resolved",
+    tags: ["markdown", "company-fact", "docs"],
+    metadata: {
+      owner: "Orange",
+      repo: "company-memory",
+      status: "active",
+      scope: "global",
+      outcome: "resolved",
+      tags: ["markdown", "company-fact", "docs"],
+    },
   },
   {
-    id: "move-cors",
-    label: "Move CORSMiddleware",
-    kind: "Solution",
+    id: "website-steering",
+    label: "Website steering stays private",
+    kind: "Insight",
     x: 62,
     y: 48,
-    summary: "Register CORSMiddleware before include_router.",
-    detailBody: "The winning solution is linked to the problem, failed attempt, and code artifact that changed in the final patch.",
+    summary: "Website taste and iteration notes should be private user memory, not shared company knowledge.",
+    detailBody: "Orange should remember steering chats that tune a website, even when the site itself can be recreated by any model.",
+    what: "User corrected the website direction after removing Problem/Solution vocabulary.",
+    why: "Design preferences are personal steering, not globally useful technical knowledge.",
+    how: "Store as private memory keyed by email.",
+    outcome: "resolved",
+    tags: ["frontend", "website-steering", "private-memory"],
+    metadata: {
+      owner: "harsh@example.com",
+      repo: "orange-site",
+      status: "active",
+      scope: "user",
+      outcome: "resolved",
+      tags: ["frontend", "website-steering", "private-memory"],
+    },
   },
   {
-    id: "server-py",
-    label: "server.py patch",
-    kind: "Artifact",
+    id: "aws-glue-fact",
+    label: "AWS Glue incident cause",
+    kind: "Insight",
     x: 78,
     y: 22,
-    summary: "Changed app construction order in the API entrypoint.",
-    detailBody: "Artifact nodes let Orange return exact files and implementation surfaces instead of only semantic summaries.",
-  },
-  {
-    id: "session",
-    label: "Debug session",
-    kind: "Session",
-    x: 73,
-    y: 70,
-    summary: "Claude Code trace from reproduction to patch verification.",
-    detailBody: "Session nodes preserve who participated, when the work happened, and the compact transcript that seeded the graph.",
+    summary: "Global/company memory should keep reusable incident causes like AWS Glue issues.",
+    detailBody: "This kind of fact helps coworkers facing the same infrastructure symptom inside the same company graph.",
+    what: "An error happened because of an AWS Glue issue.",
+    why: "Cloud service behavior can be the real cause, not application code.",
+    how: "Store the incident cause as company-scoped shared memory.",
+    outcome: "partial",
+    tags: ["aws-glue", "incident", "company-memory"],
+    metadata: {
+      owner: "Orange",
+      repo: "company-memory",
+      status: "active",
+      scope: "global",
+      outcome: "partial",
+      tags: ["aws-glue", "incident", "company-memory"],
+    },
   },
 ];
 
 const fallbackEdges: MemoryEdge[] = [
-  { id: "cors-middleware", source: "cors", target: "middleware", strength: 0.78 },
-  { id: "cors-allowed-origins", source: "cors", target: "allowed-origins", strength: 0.68 },
-  { id: "cors-move-cors", source: "cors", target: "move-cors", strength: 0.92 },
-  { id: "middleware-server-py", source: "middleware", target: "server-py", strength: 0.72 },
-  { id: "move-cors-server-py", source: "move-cors", target: "server-py", strength: 0.86 },
-  { id: "move-cors-session", source: "move-cors", target: "session", strength: 0.8 },
-  { id: "allowed-origins-session", source: "allowed-origins", target: "session", strength: 0.62 },
+  { id: "cors-steering", source: "cors-insight", target: "website-steering", label: "private", strength: 0.68 },
+  { id: "spain-markdown", source: "spain-gtm", target: "markdown-memory", label: "company", strength: 0.72 },
+  { id: "spain-aws", source: "spain-gtm", target: "aws-glue-fact", label: "shared", strength: 0.58 },
+  { id: "markdown-aws", source: "markdown-memory", target: "aws-glue-fact", label: "facts", strength: 0.64 },
 ];
 
 const visibleMemoryNodes = memoryNodes.filter((node) => node.kind !== "Session");
@@ -137,7 +190,6 @@ const outcomeClass: Record<InsightOutcomeValue, string> = {
 const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
   { value: "user", label: "My Memory" },
   { value: "global", label: "Global" },
-  { value: "both", label: "Both" },
 ];
 
 const scopeNodeClass: Record<MemoryScopeValue, string> = {
@@ -330,7 +382,7 @@ function formatDate(value?: string) {
 export default function MemoryGraph() {
   const [nodes, setNodes] = useState(visibleMemoryNodes);
   const [edges, setEdges] = useState<MemoryEdge[]>(visibleFallbackEdges);
-  const [selectedId, setSelectedId] = useState("cors");
+  const [selectedId, setSelectedId] = useState("cors-insight");
   const [scope, setScope] = useState<MemoryScopeFilter>("user");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
@@ -604,7 +656,7 @@ export default function MemoryGraph() {
         <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#5f746b]">
           Memory scope
         </p>
-        <div className="grid grid-cols-3 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
+        <div className="grid grid-cols-2 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
           {scopeOptions.map((option) => (
             <button
               key={option.value}

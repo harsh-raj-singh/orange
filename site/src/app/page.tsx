@@ -1,5 +1,5 @@
 import Image from "next/image";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import GrainCanvas from "@/components/grain-canvas";
 import MemoryGraph from "@/components/memory-graph";
 import TestChat from "@/components/test-chat";
@@ -21,67 +21,85 @@ ping_context("same OPTIONS failure")
   -> vector match: problem_cors_order
   -> graph hydrate: failed path + worked fix + server.py`;
 
-const nodeCards = [
+const appConnections = [
   {
-    type: "Problem",
-    eyebrow: "red signal",
-    title: "CORS preflight 405",
-    body: "The durable symptom, stack surface, labels, files, and recurrence history.",
-    accent: "text-[#ff8a65]",
-    code: "OPTIONS /api/chat -> 405",
-    badge: "open",
+    name: "Slack",
+    mark: "S",
+    position: "left-[7%] top-[16%]",
+    color: "#78d6a3",
+    prompt: "What did we decide with Rohan two weeks back about GTM in Spain?",
+    body: "Orange links messy channel decisions into retrievable company memory, scoped to the right org.",
   },
   {
-    type: "Solution",
-    eyebrow: "green outcome",
-    title: "Move middleware first",
-    body: "What worked, why it worked, and what earlier fixes it superseded.",
-    accent: "text-[#65d6a3]",
-    code: "app.add_middleware(CORSMiddleware)\napp.include_router(api)",
-    badge: "success",
+    name: "Google Meet",
+    mark: "GM",
+    position: "left-[37%] top-[5%]",
+    color: "#8fb8ff",
+    prompt: "Summarize the launch risk Rohan raised in last Friday's standup.",
+    body: "Meet notes become facts, decisions, and follow-ups instead of disappearing after the call.",
   },
   {
-    type: "Attempt",
-    eyebrow: "failed path",
-    title: "Origin list edit",
-    body: "Orange keeps negative work so future agents skip plausible dead ends.",
-    accent: "text-[#ffd166]",
-    code: "allow_origins=[\"*\"]\n# preflight still fails",
-    badge: "failed",
+    name: "Cursor",
+    mark: "C",
+    position: "right-[8%] top-[17%]",
+    color: "#ffb36b",
+    prompt: "Have we seen this OPTIONS failure before in this repo?",
+    body: "Cursor sessions write private engineering memory only when the work ends and there is something durable.",
   },
   {
-    type: "Artifact",
-    eyebrow: "file surface",
-    title: "server.py:42",
-    body: "A concrete implementation surface attached to the memory, not just a summary.",
-    accent: "text-[#9ec5ff]",
-    code: "core/api/server.py:42",
-    badge: "patch",
+    name: "Claude Code",
+    mark: "CC",
+    position: "left-[15%] bottom-[16%]",
+    color: "#f7c7ff",
+    prompt: "Which prior refactor changed how auth middleware is ordered?",
+    body: "Agent runs become searchable insight trails: what was tried, what stuck, and what to avoid.",
   },
   {
-    type: "Concept",
-    eyebrow: "shared cause",
-    title: "Middleware Ordering",
-    body: "A reusable idea linked across related problems and their fixes.",
-    accent: "text-[#c4f1be]",
-    code: "Concept -> Problem x2\nConcept -> Solution x1",
-    badge: "linked",
+    name: "GitHub",
+    mark: "GH",
+    position: "right-[16%] bottom-[17%]",
+    color: "#d7e1d8",
+    prompt: "Why did we reject this PR pattern last month?",
+    body: "Pull requests can connect implementation choices to the discussions and sessions that shaped them.",
   },
   {
-    type: "Session",
-    eyebrow: "source trace",
-    title: "Claude Code debug run",
-    body: "The normalized transcript, profile metadata, timestamps, and source client.",
-    accent: "text-[#f6b6ff]",
-    code: "source=claude\nturns=18\nfiles=3",
-    badge: "captured",
+    name: "Gmail",
+    mark: "G",
+    position: "left-[43%] bottom-[5%]",
+    color: "#ffd166",
+    prompt: "What did the customer ask us to change in the onboarding flow?",
+    body: "Important customer context can become scoped memory without leaking private user identity.",
+  },
+  {
+    name: "Linear",
+    mark: "L",
+    position: "left-[3%] top-[49%]",
+    color: "#a8a4ff",
+    prompt: "Which issue captured the decision to defer Spain GTM?",
+    body: "Tickets can hydrate the why behind a product or engineering decision.",
+  },
+  {
+    name: "Notion",
+    mark: "N",
+    position: "right-[3%] top-[49%]",
+    color: "#f8f5ec",
+    prompt: "Where did the team document our Markdown memory policy?",
+    body: "Docs become structured company facts that coworkers can retrieve later.",
+  },
+  {
+    name: "MCP",
+    mark: "M",
+    position: "left-[48%] top-[35%]",
+    color: "#62d49c",
+    prompt: "Before answering, ask Orange what this agent already knows.",
+    body: "MCP lets coding agents call ping_context and store_session directly from their workflow.",
   },
 ];
 
 const contextBlocks = [
   {
     title: "Before another engineer repeats a failed fix",
-    body: "Orange can surface the old attempt, why it failed, and the solution that finally worked.",
+    body: "Orange can surface the old reasoning, what failed, and the decision that finally stuck.",
   },
   {
     title: "When a new agent joins a codebase cold",
@@ -93,7 +111,7 @@ const contextBlocks = [
   },
 ];
 
-const integrations = ["Claude Code", "Cursor", "MCP", "Supabase", "Neo4j", "Chroma"];
+const integrations = ["Slack", "Google Meet", "Cursor", "Claude Code", "GitHub", "Gmail", "Linear", "Notion", "MCP"];
 
 function RevealHeading({
   children,
@@ -132,7 +150,7 @@ export default function Home() {
               Flow
             </a>
             <a className="transition hover:text-[#ff9f5f]" href="#nodes">
-              Nodes
+              Apps
             </a>
             <a className="transition hover:text-[#ff9f5f]" href="#graph">
               Graph
@@ -178,7 +196,7 @@ export default function Home() {
               ))}
             </h1>
             <p data-reveal className="mt-6 max-w-2xl text-pretty text-lg leading-8 text-[#c7d0c9] sm:text-xl">
-              Capture developer sessions from Claude Code, Cursor, and MCP. Extract the problems, failed paths, fixes, files, and metadata that future agents need before they start repeating work.
+              Capture developer sessions from Claude Code, Cursor, Slack, Meet, and MCP. Extract durable insights, company facts, private steering, files, and metadata that future agents need before they start repeating work.
             </p>
             <div data-reveal className="mt-8 flex flex-col gap-3 sm:flex-row">
               <a className="hero-cta-watch shimmer-button inline-flex h-12 items-center justify-center rounded-md bg-[#f26d21] px-6 text-sm font-bold text-white shadow-[0_18px_46px_rgba(242,109,33,0.28)] transition hover:scale-[1.02]" href="#story">
@@ -209,7 +227,7 @@ export default function Home() {
 
               <div className="mt-5 grid gap-3">
                 <div data-ping-line className="rounded-md border border-[#ffb36b]/30 bg-[#ffb36b]/10 p-4">
-                  <p className="font-mono text-xs uppercase text-[#ffb36b]">Problem</p>
+                  <p className="font-mono text-xs uppercase text-[#ffb36b]">Insight</p>
                   <p className="mt-2 text-lg font-semibold">FastAPI CORS middleware order</p>
                   <p className="mt-2 text-sm leading-6 text-[#d7e1d8]">
                     Preflight failed because middleware was registered after route setup.
@@ -269,7 +287,7 @@ export default function Home() {
               The memory loop becomes visible as you scroll.
             </RevealHeading>
             <div className="mt-8 grid gap-3">
-              {["SessionIngestionRequest", "Issue + Solution agents", "ping_context response"].map((label, index) => (
+              {["SessionIngestionRequest", "Triage + Insight agents", "ping_context response"].map((label, index) => (
                 <div className="pipeline-step rounded-lg border border-[#24352d]/12 bg-white p-4 shadow-sm" key={label}>
                   <p className="font-mono text-xs text-[#c5551c]">0{index + 1}</p>
                   <p className="mt-2 text-lg font-semibold text-[#24352d]">{label}</p>
@@ -292,9 +310,9 @@ export default function Home() {
 
               <article className="story-panel">
                 <p className="font-mono text-xs font-semibold uppercase text-[#c5551c]">Extract</p>
-                <h3 className="mt-4 text-3xl font-semibold">Agents turn the transcript into durable graph nodes.</h3>
+                <h3 className="mt-4 text-3xl font-semibold">Agents extract durable insights, facts, and steering.</h3>
                 <div className="mini-graph mt-8">
-                  {["Problem", "Attempt", "Solution", "Artifact"].map((node, index) => (
+                  {["Insight", "User fact", "Company fact", "Steering"].map((node, index) => (
                     <span style={{ animationDelay: `${index * 180}ms` }} key={node}>{node}</span>
                   ))}
                 </div>
@@ -305,9 +323,9 @@ export default function Home() {
                 <h3 className="mt-4 text-3xl font-semibold">The next agent receives the neighborhood, not a vague memory.</h3>
                 <div className="mt-8 rounded-lg border border-[#24352d]/10 bg-white p-5 shadow-sm">
                   <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm leading-7 text-[#24352d]">{`{
-  "matched_nodes": ["Problem", "Solution"],
+  "matched_nodes": ["Insight", "Company fact"],
   "similarity_score": 0.91,
-  "neighborhood": ["failed path", "worked fix", "server.py"]
+  "neighborhood": ["decision", "source", "server.py"]
 }`}</pre>
                 </div>
               </article>
@@ -318,41 +336,79 @@ export default function Home() {
 
       <section id="nodes" className="bg-[#0d1210] px-5 py-16 text-[#fff9ef] sm:px-8 lg:py-24">
         <div className="mx-auto max-w-7xl">
-          <div className="grid gap-10 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
+          <div className="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:items-end">
             <div>
-              <SectionEyebrow tone="green">Graph objects</SectionEyebrow>
+              <SectionEyebrow tone="green">Connected sources</SectionEyebrow>
               <RevealHeading className="mt-4 text-4xl font-semibold leading-tight sm:text-6xl">
-                Compact for search. Rich when opened.
+                One memory fabric across the apps where work happens.
               </RevealHeading>
             </div>
             <p data-reveal className="max-w-2xl text-lg leading-8 text-[#c7d0c9]">
-              The vector store carries searchable summaries. Neo4j carries the relationships: attempts, refinements, files, causes, concepts, and session provenance.
+              Orange sits in the middle of conversations, code sessions, meetings, docs, tickets, and email. Hover an app to see the kind of question it can answer later.
             </p>
           </div>
 
-          <div data-bento-grid className="mt-12 grid auto-rows-[minmax(220px,auto)] gap-4 md:grid-cols-6">
-            {nodeCards.map((card, index) => (
-              <article
-                data-bento-card
-                className={`bento-card ${index === 0 || index === 1 ? "md:col-span-3" : "md:col-span-2"}`}
-                key={card.type}
-              >
-                <div className="flex items-center justify-between">
-                  <p className={`font-mono text-xs font-semibold uppercase ${card.accent}`}>{card.eyebrow}</p>
-                  <span className="rounded-full border border-white/12 bg-white/[0.06] px-2.5 py-1 font-mono text-xs text-[#d7e1d8]">{card.badge}</span>
-                </div>
-                <h3 className="mt-5 text-2xl font-semibold">{card.type}</h3>
-                <p className="mt-2 text-lg font-semibold text-[#f8c08a]">{card.title}</p>
-                <p className="mt-4 text-sm leading-6 text-[#b8c3ba]">{card.body}</p>
-                <pre className="mt-5 overflow-x-auto rounded-md border border-white/10 bg-black/24 p-3 font-mono text-xs leading-6 text-[#e9efe9]">{card.code}</pre>
-              </article>
-            ))}
-          </div>
+          <div className="mt-12 grid gap-5 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch">
+            <div data-bento-grid className="source-map-card relative min-h-[620px] overflow-hidden rounded-xl border border-white/10 bg-[#121a16] p-4 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:p-6">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(242,109,33,0.2),transparent_32%),radial-gradient(circle_at_18%_20%,rgba(98,212,156,0.12),transparent_25%),radial-gradient(circle_at_82%_24%,rgba(143,184,255,0.12),transparent_24%)]" />
+              <svg className="source-map-lines absolute inset-0 h-full w-full" role="presentation" viewBox="0 0 100 100" preserveAspectRatio="none">
+                {[
+                  [50, 46, 14, 21],
+                  [50, 46, 43, 10],
+                  [50, 46, 84, 22],
+                  [50, 46, 22, 81],
+                  [50, 46, 78, 80],
+                  [50, 46, 49, 91],
+                  [50, 46, 9, 53],
+                  [50, 46, 91, 53],
+                  [50, 46, 53, 43],
+                ].map(([x1, y1, x2, y2], index) => (
+                  <line key={`${x2}-${y2}`} x1={x1} y1={y1} x2={x2} y2={y2} style={{ animationDelay: `${index * 90}ms` }} />
+                ))}
+              </svg>
 
-          <div className="mt-8 rounded-xl border border-white/10 bg-[#17221c] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.28)]">
-            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm leading-7 text-[#dce8df]">
-              <code data-type-code>{schemaCode}</code>
-            </pre>
+              <div className="orange-core-logo absolute left-1/2 top-[46%] z-10 -translate-x-1/2 -translate-y-1/2">
+                <span className="orange-core-leaf" />
+                <span className="orange-core-ring">O</span>
+                <strong>ORANGE</strong>
+                <small>memory fabric</small>
+              </div>
+
+              {appConnections.map((app) => (
+                <button
+                  className={`source-node group absolute z-20 ${app.position}`}
+                  key={app.name}
+                  type="button"
+                  style={{ "--source-color": app.color } as CSSProperties}
+                  aria-label={`${app.name}: ${app.prompt}`}
+                >
+                  <span className="source-mark">{app.mark}</span>
+                  <span className="source-name">{app.name}</span>
+                  <span className="source-tooltip" role="tooltip">
+                    <strong>{app.prompt}</strong>
+                    <span>{app.body}</span>
+                  </span>
+                </button>
+              ))}
+
+              <div className="absolute bottom-5 left-5 right-5 z-10 flex flex-wrap gap-2">
+                {["private user facts", "company facts", "agent sessions", "meetings", "tickets", "email"].map((label) => (
+                  <span className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2 font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#c7d0c9]" key={label}>
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-[#17221c] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.28)]">
+              <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-4">
+                <p className="font-mono text-xs font-semibold uppercase tracking-[0.16em] text-[#ffb36b]">live contract</p>
+                <span className="rounded-full border border-white/12 bg-white/[0.06] px-2.5 py-1 font-mono text-xs text-[#d7e1d8]">typing</span>
+              </div>
+              <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm leading-7 text-[#dce8df]">
+                <code data-type-code>{schemaCode}</code>
+              </pre>
+            </div>
           </div>
         </div>
       </section>
@@ -374,8 +430,8 @@ export default function Home() {
             </div>
             <div className="grid grid-cols-3 gap-3 text-center">
               <div className="rounded-lg bg-white p-4 shadow-sm">
-                <p className="text-3xl font-semibold text-[#c5551c]" data-count-to="6">0</p>
-                <p className="mt-1 text-xs font-semibold text-[#536057]">node types</p>
+                <p className="text-3xl font-semibold text-[#c5551c]" data-count-to="2">0</p>
+                <p className="mt-1 text-xs font-semibold text-[#536057]">scope views</p>
               </div>
               <div className="rounded-lg bg-white p-4 shadow-sm">
                 <p className="text-3xl font-semibold text-[#2f6f5e]" data-count-to="91" data-count-suffix="%">0%</p>

@@ -209,6 +209,166 @@ html[data-scrolled] .site-nav {
   top: 12%;
 }
 
+.source-map-card {
+  isolation: isolate;
+}
+
+.source-map-lines line {
+  stroke: rgba(255, 179, 107, 0.32);
+  stroke-width: 0.18;
+  stroke-dasharray: 38;
+  stroke-dashoffset: 38;
+  animation: source-line-draw 960ms ease forwards;
+}
+
+.orange-core-logo {
+  display: flex;
+  width: 9.5rem;
+  height: 9.5rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 179, 107, 0.42);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 46% 35%, rgba(255, 194, 119, 0.32), transparent 36%),
+    linear-gradient(145deg, rgba(242, 109, 33, 0.28), rgba(13, 18, 16, 0.92));
+  box-shadow:
+    0 0 0 12px rgba(242, 109, 33, 0.05),
+    0 0 80px rgba(242, 109, 33, 0.24),
+    inset 0 0 40px rgba(255, 255, 255, 0.08);
+  text-align: center;
+}
+
+.orange-core-ring {
+  display: grid;
+  width: 3.15rem;
+  height: 3.15rem;
+  place-items: center;
+  border: 2px solid rgba(255, 249, 239, 0.9);
+  border-radius: 999px;
+  color: #fff9ef;
+  font-size: 1.45rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.orange-core-leaf {
+  position: absolute;
+  top: 1.4rem;
+  right: 2.65rem;
+  width: 1.2rem;
+  height: 0.65rem;
+  border-radius: 100% 0;
+  background: #62d49c;
+  transform: rotate(-28deg);
+}
+
+.orange-core-logo strong {
+  margin-top: 0.65rem;
+  color: #fff9ef;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+}
+
+.orange-core-logo small {
+  margin-top: 0.2rem;
+  color: rgba(215, 225, 216, 0.78);
+  font-size: 0.72rem;
+}
+
+.source-node {
+  --source-color: #ffb36b;
+  display: grid;
+  min-width: 7.6rem;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--source-color), transparent 42%);
+  border-radius: 0.75rem;
+  background: rgba(9, 14, 11, 0.78);
+  padding: 0.7rem 0.8rem;
+  color: #fff9ef;
+  text-align: left;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(12px);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.source-node:hover,
+.source-node:focus-visible {
+  border-color: var(--source-color);
+  background: rgba(16, 23, 19, 0.96);
+  box-shadow:
+    0 22px 62px rgba(0, 0, 0, 0.32),
+    0 0 34px color-mix(in srgb, var(--source-color), transparent 70%);
+  outline: none;
+  transform: translateY(-4px) scale(1.04) !important;
+}
+
+.source-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--source-color), transparent 76%);
+  color: var(--source-color);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.source-name {
+  color: #f7f3e8;
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.source-tooltip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 0.75rem);
+  z-index: 40;
+  display: grid;
+  width: min(18rem, 76vw);
+  gap: 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--source-color), transparent 45%);
+  border-radius: 0.75rem;
+  background: rgba(248, 245, 236, 0.96);
+  padding: 0.9rem;
+  color: #24352d;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -6px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.source-tooltip strong {
+  color: #17221c;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.source-tooltip span {
+  color: #536057;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.source-node:hover .source-tooltip,
+.source-node:focus-visible .source-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .bento-card {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
@@ -290,6 +450,12 @@ html[data-scrolled] .site-nav {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes source-line-draw {
+  to {
+    stroke-dashoffset: 0;
   }
 }
 
