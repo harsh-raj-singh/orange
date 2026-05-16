@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.agents.orchestrator import _session_node_from_normalized
 from core.ingestion import SessionIngestionRequest, normalize_ingestion_request
 
 
@@ -73,3 +74,18 @@ def test_normalizes_simple_transcript_and_generates_stable_identity() -> None:
 
     assert first.session_id == second.session_id
     assert first.transcript == "User: Import fails\nAssistant: Check package exports"
+
+
+def test_session_node_defaults_missing_started_at_to_ingested_at() -> None:
+    normalized = normalize_ingestion_request(
+        SessionIngestionRequest(
+            source="cursor",
+            user_id="dev_123",
+            session_id="missing-start",
+            messages=[{"role": "user", "content": "CORS preflight fails"}],
+        )
+    )
+
+    session_node = _session_node_from_normalized(normalized, "CORS preflight fails")
+
+    assert session_node.started_at == normalized.ingested_at

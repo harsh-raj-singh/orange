@@ -19,6 +19,18 @@ def _run_neo4j_ping(neo4j: object) -> None:
     raise ValueError("Neo4j client must expose run(...) or session().")
 
 
+@router.get("/")
+async def root() -> JSONResponse:
+    return JSONResponse(
+        {
+            "status": "ok",
+            "service": "orange-backend",
+            "health": "/health",
+            "deep_health": "/health/deep",
+        }
+    )
+
+
 @router.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse({"status": "ok", "service": "orange-backend"})

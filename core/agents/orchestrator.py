@@ -8,6 +8,7 @@ Execution order:
 3. upsert_v2 writes everything to Neo4j
 """
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from core.agents.issue_agent.prompts import ISSUE_AGENT_GLOBAL_SCOPE_PROMPT, ISSUE_AGENT_USER_SCOPE_PROMPT
@@ -34,10 +35,11 @@ def _select_scope_prompts(scope: str) -> tuple[str, str]:
 
 
 def _session_node_from_normalized(scoped_session: NormalizedSession, summary: str) -> Session:
+    started_at = scoped_session.started_at or scoped_session.ingested_at or datetime.now(timezone.utc)
     return Session(
         node_id=scoped_session.session_node_id,
         source=scoped_session.source,
-        started_at=scoped_session.started_at,
+        started_at=started_at,
         ended_at=scoped_session.ended_at,
         message_count=scoped_session.message_count,
         title=scoped_session.title,
