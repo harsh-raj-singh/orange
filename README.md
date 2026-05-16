@@ -1,45 +1,122 @@
 # Orange Memory Fabric
 
-Orange is a chat-centric memory fabric for debugging and technical conversations. It turns transcripts into structured problem and solution memory, writes that memory into a graph plus vector store, exposes it through MCP tools, and makes the whole system inspectable through a visualization API.
+Orange is a memory fabric for developer and agentic workflows. It captures completed sessions from tools like Cursor, Claude Code, MCP, Slack-style chats, Gmail-style threads, and the demo chat, extracts durable memory, stores it in graph/vector form, and retrieves relevant past context when a similar session happens later.
+
+Live demo: [https://site-sage-eta-18.vercel.app](https://site-sage-eta-18.vercel.app)
+
+Backend API: [https://orange-api-production.up.railway.app](https://orange-api-production.up.railway.app)
+
+## Core Loop
+
+```text
+SessionIngestionRequest
+-> normalize session/messages/profile metadata
+-> wait until the session is marked done
+-> triage whether anything is worth storing
+-> extract durable Insights
+-> write Session + Insight graph nodes to Neo4j
+-> write searchable vectors to Chroma
+-> retrieve prior context with ping_context
+```
+
+The most important product loop is:
+
+```text
+capture session -> extract memory -> store graph/vector -> retrieve context later
+```
 
 ## What It Does
 
-- Extracts `Problem` and `Solution` nodes from raw transcripts
-- Links solution attempts to the problems they address
-- Tracks follow-up attempts and refinement chains across solutions
-- Stores graph memory in Neo4j and semantic retrieval memory in Chroma
-- Stores users, organizations, raw sessions, messages, and write jobs in Supabase Postgres
-- Exposes retrieval and inspection tools through an MCP server
-- Ships a local visualization API for graph and vector inspection
-- Includes Streamlit and Slack entry points for interactive use
+- Stores unified `Insight` nodes instead of separate Problem/Solution nodes for new writes.
+- Runs extraction only when a user marks a conversation done.
+- Uses a Triage Agent to avoid storing generic or low-value chats.
+- Extracts engineering insights, user facts, company facts, preferences, and steering.
+- Keeps private user memory scoped by email.
+- Keeps shared company knowledge scoped by company/org so different companies do not connect.
+- Stores graph memory in Neo4j and semantic retrieval memory in Chroma.
+- Stores normalized sessions, messages, users, organizations, and memory jobs in Supabase/Postgres scaffolding.
+- Exposes retrieval and inspection through MCP tools and FastAPI routes.
+- Ships a polished Next.js demo site with chat, graph visualization, and source-app memory map.
+
+## Memory Scopes
+
+Orange treats memory as two related but separate graphs:
+
+```text
+Same completed session
+       |
+       |-> User memory
+       |   raw/private context, keyed by user email
+       |
+       |-> Company memory
+           shared facts/incidents, keyed by company/org
+```
+
+User memory can store personal details, preferences, website steering, and private debugging history. Company memory should store only durable facts useful to coworkers in the same company, such as internal workflow facts, incident causes, tool decisions, or org-specific technical context.
+
+Examples:
+
+- User memory: "Harsh prefers the Orange homepage to explain app connectors visually, not as node-type cards."
+- User memory: "Website steering chats should be remembered privately, not shared globally."
+- Company memory: "The company uses `.md` files as the source format for memory."
+- Company memory: "AWS Glue issue caused this class of pipeline failure."
 
 ## Core Components
 
+### Ingestion + Normalization
+
+- `core/ingestion/session.py` normalizes session payloads, messages, timestamps, profile metadata, `user_email`, company/org identity, source URL, and client/tool metadata.
+- Demo completion starts from the frontend and posts the finished conversation to the backend through `POST /demo/complete`.
+
 ### Extraction Pipeline
-- `core/agents/solution_agent/` parses solution attempts, outcomes, summaries, and refinement relationships.
-- `core/agents/issue_agent/` segments problems, extracts technical context, builds canonical labels, and stitches problem relationships.
-- `core/agents/orchestrator.py` runs the end-to-end extraction pipeline.
+
+- `core/agents/triage/` decides whether a completed conversation produced anything worth storing.
+- `core/agents/insight_extractor/` extracts the minimum set of durable `Insight` nodes from the full session transcript.
+- `core/agents/pii_scrubber/` cleans transcripts before company/shared extraction.
+- `core/agents/orchestrator.py` runs the completed-session pipeline.
+
+Legacy `issue_agent` and `solution_agent` folders are still present for reference and backwards compatibility, but the new completed-session pipeline writes `Insight` nodes.
 
 ### Persistence Layer
-- `core/graph_upsert/writer.py` writes session, problem, and solution nodes plus edges into Neo4j.
-- `core/graph_upsert/dedup.py` manages the shared Chroma collection and embedding setup.
-- `core/storage/supabase_store.py` stores organization, user, normalized session, message, and memory job metadata in Supabase Postgres.
-- `core/graph_schema_v2.py` defines the current graph-facing data model.
 
-### Query + Inspection Layer
+- `core/graph_upsert/writer.py` writes `Session` and `Insight` nodes plus relationships into Neo4j.
+- `core/graph_upsert/embeddings.py` builds embedding strings for Chroma.
+- `core/graph_upsert/dedup.py` manages Chroma collections and similarity checks.
+- `core/storage/supabase_store.py` stores durable metadata in Supabase/Postgres when configured.
+- `core/graph_schema_v2.py` defines graph-facing data models, including `Insight`.
+
+Current vector collections:
+
+```text
+orange_user_vectors
+orange_global_vectors
+```
+
+Company/shared vectors are scoped by company/org metadata so one company's graph does not bleed into another company's retrieval.
+
+### Retrieval + Inspection
+
 - `core/mcp_server/server.py` exposes MCP tools such as `ping_context`, `store_session`, `inspect_graph`, `get_node`, and `chroma_peek`.
-- `core/mcp_server/handlers.py` contains the tool handlers and type-aware retrieval logic.
-- `core/graph_queries/neo4j_queries.py` centralizes reusable Neo4j read queries shared by MCP and the viz API.
-
-### Visualization Layer
-- `core/viz_api/main.py` starts a FastAPI app for graph and Chroma inspection.
-- `core/viz_api/routes/graph.py` serves graph-oriented endpoints.
+- `core/mcp_server/handlers.py` contains the MCP tool handlers and retrieval logic.
+- `core/viz_api/routes/demo.py` exposes demo-facing `POST /demo/complete` and `POST /demo/ping_context`.
+- `core/viz_api/routes/graph.py` serves graph read endpoints used by the demo.
 - `core/viz_api/routes/chroma.py` serves vector-store inspection endpoints.
-- `core/viz_api/routes/health.py` verifies Neo4j and Chroma connectivity.
+- `core/viz_api/routes/health.py` provides lightweight and deep health checks.
 
-### Interfaces
-- `streamlit_app.py` is the local debugging UI.
-- `core/slack_bot.py` is the Slack integration entry point.
+### Frontend Demo
+
+The Next.js site lives in `site/`.
+
+It includes:
+
+- Orange landing/demo page
+- connected source-app memory map
+- animated live contract code block
+- profile collection using email and company as the important identity fields
+- demo chat with streaming responses
+- "Mark conversation done" action that triggers backend storage
+- graph visualization with `My Memory` and `Global` scope views
+- retrieval chips showing whether context came from private or shared memory
 
 ## Repository Layout
 
@@ -47,34 +124,38 @@ Orange is a chat-centric memory fabric for debugging and technical conversations
 .
 ├── core/
 │   ├── agents/
+│   │   ├── insight_extractor/
+│   │   ├── pii_scrubber/
+│   │   └── triage/
 │   ├── graph_queries/
 │   ├── graph_upsert/
+│   ├── ingestion/
 │   ├── mcp_server/
-│   ├── memory_extraction/
 │   └── viz_api/
+├── site/
+│   └── src/
 ├── scripts/
-│   └── test_pipeline.py
+├── supabase/
 ├── tests/
-├── streamlit_app.py
+├── DEPLOY.md
+├── railway.toml
 └── requirements.txt
 ```
 
 ## Quick Start
 
-### 1. Create a virtual environment
+### 1. Create a Python environment
 
 ```bash
 python3.11 -m venv venv311
 source venv311/bin/activate
 ```
 
-### 2. Install dependencies
+### 2. Install backend dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
-
-This installs `mem0ai` from PyPI rather than relying on a vendored local checkout.
 
 ### 3. Configure environment
 
@@ -82,16 +163,103 @@ This installs `mem0ai` from PyPI rather than relying on a vendored local checkou
 cp .env.example .env
 ```
 
-Fill in the values you need. At minimum, configure:
+Important variables:
 
 - `OPENAI_API_KEY`
-- Neo4j connection settings (`MEMGRAPH_URL` or `MEMGRAPH_HOST` + auth)
-- Optional `SUPABASE_DB_URL` or `POSTGRES_DSN` for the Postgres metadata store
-- Optional `CHROMA_PATH` if you do not want the default local path
+- `OPENAI_MODEL`
+- `NEO4J_URI`
+- `NEO4J_USER`
+- `NEO4J_PASSWORD`
+- `CHROMA_PATH`
+- `ALLOWED_ORIGINS`
+- optional `SUPABASE_DB_URL` or `POSTGRES_DSN`
+- optional `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN`
 
-### Supabase Schema
+For local frontend-to-backend calls, set:
 
-Orange keeps enterprise/user/session truth out of the graph and vector index. The Supabase migration in `supabase/migrations/` creates a private `orange` schema with:
+```text
+ORANGE_BACKEND_URL=http://localhost:8001
+```
+
+For Vercel production, `ORANGE_BACKEND_URL` should point at the Railway backend.
+
+## Running Locally
+
+### Start the FastAPI backend
+
+```bash
+PYTHONPATH=. uvicorn core.viz_api.main:app --reload --port 8001
+```
+
+Useful endpoints:
+
+- `GET /health`
+- `GET /health/deep`
+- `GET /graph/full`
+- `GET /graph/nodes`
+- `GET /chroma/status`
+- `GET /chroma/peek?limit=5`
+- `POST /demo/complete`
+- `POST /demo/ping_context`
+
+### Start the Next.js demo
+
+```bash
+cd site
+npm install
+npm run dev -- -p 3004
+```
+
+Open:
+
+```text
+http://localhost:3004
+```
+
+### Start the MCP server
+
+```bash
+PYTHONPATH=. python -m core.mcp_server.server
+```
+
+This runs Orange in stdio mode for MCP-compatible clients.
+
+## MCP Tools
+
+The MCP server currently exposes:
+
+- `ping_context`
+- `store_session`
+- `resolve_problem`
+- `inspect_graph`
+- `get_node`
+- `get_session_graph`
+- `list_sessions`
+- `chroma_peek`
+
+`resolve_problem` remains for compatibility; the current memory write path is session-level Insight extraction.
+
+## Deployed Demo
+
+Frontend:
+
+```text
+https://site-sage-eta-18.vercel.app
+```
+
+Backend:
+
+```text
+https://orange-api-production.up.railway.app
+```
+
+The Vercel site calls the Railway backend through `ORANGE_BACKEND_URL`. If that variable is absent, the demo graph can fall back to in-memory demo data, but real persistence requires Railway + Neo4j + Chroma.
+
+See `DEPLOY.md` for Railway/Vercel setup details, including Chroma volume persistence.
+
+## Supabase Schema
+
+Orange keeps durable metadata separate from the graph/vector stores. The Supabase migration in `supabase/migrations/` creates a private `orange` schema with:
 
 - `organizations`
 - `users`
@@ -103,79 +271,38 @@ Orange keeps enterprise/user/session truth out of the graph and vector index. Th
 
 The schema enables RLS and revokes browser-facing `anon`/`authenticated` access. Use server-side database credentials for this path until product-facing policies are intentionally designed.
 
-## Running the System
-
-### Run the local test pipeline
-
-```bash
-PYTHONPATH=. python scripts/test_pipeline.py
-```
-
-This exercises:
-- Solution extraction
-- Issue extraction
-- Graph upsert
-- Chroma embedding creation
-
-### Start the visualization API
-
-```bash
-PYTHONPATH=. uvicorn core.viz_api.main:app --reload --port 8001
-```
-
-Useful endpoints:
-
-- `GET /health`
-- `GET /graph/full`
-- `GET /graph/sessions`
-- `GET /graph/problems`
-- `GET /chroma/status`
-- `GET /chroma/peek?limit=5`
-
-### Start the MCP server
-
-```bash
-PYTHONPATH=. python -m core.mcp_server.server
-```
-
-This runs the Orange MCP server in stdio mode for tools-based clients.
-
-### Launch Streamlit
-
-```bash
-streamlit run streamlit_app.py
-```
-
-## MCP Tools
-
-The MCP server currently exposes tools for:
-
-- `ping_context`
-- `store_session`
-- `resolve_problem`
-- `inspect_graph`
-- `get_node`
-- `get_session_graph`
-- `list_sessions`
-- `chroma_peek`
-
 ## Testing
 
+Focused checks used during current development:
+
 ```bash
-python -m py_compile core/**/*.py scripts/test_pipeline.py
-pytest
+PYTHONPATH=. pytest tests/test_insight_pipeline.py tests/test_mcp_handlers.py tests/test_graph_upsert_v2_writer.py tests/test_ingestion_normalization.py
 ```
+
+Frontend checks:
+
+```bash
+cd site
+npm run lint
+npm run build
+```
+
+Full pytest is not fully clean yet because some legacy tests still import older modules or run live pipeline work during collection.
 
 ## Security Notes
 
-- This repository is intended to be pushed without secrets.
-- `.env`, local databases, vector stores, Claude config, and generated inspection exports are gitignored.
-- Use `.env.example` as the template for local configuration.
-- Before pushing, do one last pass with a secret scan over tracked files.
+- Do not commit secrets.
+- `.env`, local databases, Chroma stores, generated inspection exports, and local app artifacts should stay ignored.
+- Shared/company memory must not expose contributor emails or private user details.
+- Global/company retrieval must remain scoped by company/org identity.
+- Use `.env.example` as the local configuration template.
 
 ## Roadmap-Friendly Areas
 
-- Better session-level metadata and summarization
-- Stronger problem deduplication and merge reporting
-- Frontend graph explorer on top of the viz API
-- Broader Slack and MCP workflows for memory inspection
+- Make `store_session` async with `memory_write_jobs`
+- Add `get_job_status(job_id)`
+- Tighten auth and user identity before real org usage
+- Improve extraction observability and benchmarks
+- Clean or delete legacy tests/imports
+- Expand source connectors beyond the demo UI
+- Improve company-scoped graph persistence and admin inspection
