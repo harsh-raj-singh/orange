@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { siClaude, siGmail, siLinear } from "simple-icons";
 import type { CSSProperties, ReactNode } from "react";
 import GrainCanvas from "@/components/grain-canvas";
 import MemoryGraph from "@/components/memory-graph";
@@ -24,75 +25,43 @@ ping_context("same OPTIONS failure")
 const appConnections = [
   {
     name: "Slack",
-    mark: "S",
-    position: "left-[7%] top-[16%]",
-    color: "#78d6a3",
-    prompt: "What did we decide with Rohan two weeks back about GTM in Spain?",
-    body: "Orange links messy channel decisions into retrievable company memory, scoped to the right org.",
-  },
-  {
-    name: "Google Meet",
-    mark: "GM",
-    position: "left-[37%] top-[5%]",
-    color: "#8fb8ff",
-    prompt: "Summarize the launch risk Rohan raised in last Friday's standup.",
-    body: "Meet notes become facts, decisions, and follow-ups instead of disappearing after the call.",
-  },
-  {
-    name: "Cursor",
-    mark: "C",
-    position: "right-[8%] top-[17%]",
-    color: "#ffb36b",
-    prompt: "Have we seen this OPTIONS failure before in this repo?",
-    body: "Cursor sessions write private engineering memory only when the work ends and there is something durable.",
-  },
-  {
-    name: "Claude Code",
-    mark: "CC",
-    position: "left-[15%] bottom-[16%]",
-    color: "#f7c7ff",
-    prompt: "Which prior refactor changed how auth middleware is ordered?",
-    body: "Agent runs become searchable insight trails: what was tried, what stuck, and what to avoid.",
-  },
-  {
-    name: "GitHub",
-    mark: "GH",
-    position: "right-[16%] bottom-[17%]",
-    color: "#d7e1d8",
-    prompt: "Why did we reject this PR pattern last month?",
-    body: "Pull requests can connect implementation choices to the discussions and sessions that shaped them.",
+    icon: "slack",
+    position: "left-[22%] top-[35%]",
+    color: "#4A154B",
+    path: "M 25 40 C 32 42 40 46 50 48",
+    time: "2 weeks ago",
+    prompt: "What did Rohan and I decide about GTM strategy for Spain?",
+    body: "Decided: soft launch Q3, no paid ads yet, focus on inbound from Barcelona devs",
   },
   {
     name: "Gmail",
-    mark: "G",
-    position: "left-[43%] bottom-[5%]",
-    color: "#ffd166",
-    prompt: "What did the customer ask us to change in the onboarding flow?",
-    body: "Important customer context can become scoped memory without leaking private user identity.",
+    icon: "gmail",
+    position: "right-[21%] top-[31%]",
+    color: "#EA4335",
+    path: "M 72 36 C 66 40 58 45 50 48",
+    time: "from email",
+    prompt: "Thread with investors re: Series A timeline",
+    body: "Harsh asked for 60-day extension, confirmed by Arjun",
+  },
+  {
+    name: "Claude Code",
+    icon: "claude",
+    position: "left-[27%] bottom-[18%]",
+    color: "#D97706",
+    path: "M 31 74 C 36 64 43 54 50 48",
+    time: "last session",
+    prompt: "Debugged CORS preflight 405 on /api/ingest",
+    body: "Fix was middleware order in server.py",
   },
   {
     name: "Linear",
-    mark: "L",
-    position: "left-[3%] top-[49%]",
-    color: "#a8a4ff",
-    prompt: "Which issue captured the decision to defer Spain GTM?",
-    body: "Tickets can hydrate the why behind a product or engineering decision.",
-  },
-  {
-    name: "Notion",
-    mark: "N",
-    position: "right-[3%] top-[49%]",
-    color: "#f8f5ec",
-    prompt: "Where did the team document our Markdown memory policy?",
-    body: "Docs become structured company facts that coworkers can retrieve later.",
-  },
-  {
-    name: "MCP",
-    mark: "M",
-    position: "left-[48%] top-[35%]",
-    color: "#62d49c",
-    prompt: "Before answering, ask Orange what this agent already knows.",
-    body: "MCP lets coding agents call ping_context and store_session directly from their workflow.",
+    icon: "linear",
+    position: "right-[25%] bottom-[23%]",
+    color: "#5E6AD2",
+    path: "M 72 70 C 65 61 57 53 50 48",
+    time: "ticket #OG-47",
+    prompt: "Neo4j index rebuild caused 3x slower recall on dense graphs",
+    body: "Workaround in branch `fix/graph-perf`",
   },
 ];
 
@@ -134,6 +103,36 @@ function SectionEyebrow({ children, tone = "orange" }: { children: ReactNode; to
     <p className={`font-mono text-sm font-semibold uppercase ${tone === "orange" ? "text-[#ff9f5f]" : "text-[#62d49c]"}`}>
       {children}
     </p>
+  );
+}
+
+function BrandIcon({ icon }: { icon: string }) {
+  if (icon === "slack") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 122.8 122.8">
+        <path d="M30.3 77.2c0 8.4-6.8 15.2-15.2 15.2S0 85.6 0 77.2 6.8 62 15.2 62h15.2v15.2z" fill="#E01E5A" />
+        <path d="M37.9 77.2c0-8.4 6.8-15.2 15.2-15.2s15.2 6.8 15.2 15.2v38c0 8.4-6.8 15.2-15.2 15.2s-15.2-6.8-15.2-15.2v-38z" fill="#E01E5A" />
+        <path d="M53.1 30.3c-8.4 0-15.2-6.8-15.2-15.2S44.7 0 53.1 0s15.2 6.8 15.2 15.2v15.2H53.1z" fill="#36C5F0" />
+        <path d="M53.1 37.9c8.4 0 15.2 6.8 15.2 15.2S61.5 68.3 53.1 68.3h-38C6.8 68.3 0 61.5 0 53.1s6.8-15.2 15.2-15.2h37.9z" fill="#36C5F0" />
+        <path d="M92.4 53.1c0-8.4 6.8-15.2 15.2-15.2s15.2 6.8 15.2 15.2-6.8 15.2-15.2 15.2H92.4V53.1z" fill="#2EB67D" />
+        <path d="M84.8 53.1c0 8.4-6.8 15.2-15.2 15.2s-15.2-6.8-15.2-15.2v-38C54.4 6.8 61.2 0 69.6 0s15.2 6.8 15.2 15.2v37.9z" fill="#2EB67D" />
+        <path d="M69.6 92.4c8.4 0 15.2 6.8 15.2 15.2s-6.8 15.2-15.2 15.2-15.2-6.8-15.2-15.2V92.4h15.2z" fill="#ECB22E" />
+        <path d="M69.6 84.8c-8.4 0-15.2-6.8-15.2-15.2s6.8-15.2 15.2-15.2h38c8.4 0 15.2 6.8 15.2 15.2s-6.8 15.2-15.2 15.2h-38z" fill="#ECB22E" />
+      </svg>
+    );
+  }
+
+  const iconMap = {
+    gmail: siGmail,
+    linear: siLinear,
+    claude: siClaude,
+  } as const;
+  const selectedIcon = iconMap[icon as keyof typeof iconMap];
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d={selectedIcon.path} fill="currentColor" />
+    </svg>
   );
 }
 
@@ -349,27 +348,21 @@ export default function Home() {
           </div>
 
           <div className="mt-12 grid gap-5 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch">
-            <div data-bento-grid className="source-map-card relative min-h-[620px] overflow-hidden rounded-xl border border-white/10 bg-[#121a16] p-4 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:p-6">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(242,109,33,0.2),transparent_32%),radial-gradient(circle_at_18%_20%,rgba(98,212,156,0.12),transparent_25%),radial-gradient(circle_at_82%_24%,rgba(143,184,255,0.12),transparent_24%)]" />
+            <div data-bento-grid className="source-map-card relative min-h-[620px] overflow-hidden rounded-xl border border-white/10 bg-[#0A0A0F] p-4 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:p-6">
+              <div className="source-map-ambient absolute inset-0" />
               <svg className="source-map-lines absolute inset-0 h-full w-full" role="presentation" viewBox="0 0 100 100" preserveAspectRatio="none">
-                {[
-                  [50, 46, 14, 21],
-                  [50, 46, 43, 10],
-                  [50, 46, 84, 22],
-                  [50, 46, 22, 81],
-                  [50, 46, 78, 80],
-                  [50, 46, 49, 91],
-                  [50, 46, 9, 53],
-                  [50, 46, 91, 53],
-                  [50, 46, 53, 43],
-                ].map(([x1, y1, x2, y2], index) => (
-                  <line key={`${x2}-${y2}`} x1={x1} y1={y1} x2={x2} y2={y2} style={{ animationDelay: `${index * 90}ms` }} />
+                {appConnections.map((app, index) => (
+                  <g key={app.name} style={{ "--source-color": app.color, "--flow-delay": `${index * 520}ms` } as CSSProperties}>
+                    <path className="source-flow-path" d={app.path} />
+                    <path className="source-flow-path source-flow-path-soft" d={app.path} />
+                    <circle className="source-flow-dot" r="0.9">
+                      <animateMotion dur="3.2s" begin={`${index * 0.42}s`} repeatCount="indefinite" path={app.path} />
+                    </circle>
+                  </g>
                 ))}
               </svg>
 
               <div className="orange-core-logo absolute left-1/2 top-[46%] z-10 -translate-x-1/2 -translate-y-1/2">
-                <span className="orange-core-leaf" />
-                <span className="orange-core-ring">O</span>
                 <strong>ORANGE</strong>
                 <small>memory fabric</small>
               </div>
@@ -382,22 +375,24 @@ export default function Home() {
                   style={{ "--source-color": app.color } as CSSProperties}
                   aria-label={`${app.name}: ${app.prompt}`}
                 >
-                  <span className="source-mark">{app.mark}</span>
-                  <span className="source-name">{app.name}</span>
+                  <span className="source-mark">
+                    <BrandIcon icon={app.icon} />
+                  </span>
                   <span className="source-tooltip" role="tooltip">
-                    <strong>{app.prompt}</strong>
-                    <span>{app.body}</span>
+                    <span className="source-tooltip-accent" />
+                    <span className="source-tooltip-header">
+                      <span className="source-tooltip-icon">
+                        <BrandIcon icon={app.icon} />
+                      </span>
+                      <span>{app.name}</span>
+                      <span className="source-tooltip-time">· {app.time}</span>
+                    </span>
+                    <span className="source-tooltip-rule" />
+                    <strong>&quot;{app.prompt}&quot;</strong>
+                    <span className="source-tooltip-answer">→ {app.body}</span>
                   </span>
                 </button>
               ))}
-
-              <div className="absolute bottom-5 left-5 right-5 z-10 flex flex-wrap gap-2">
-                {["private user facts", "company facts", "agent sessions", "meetings", "tickets", "email"].map((label) => (
-                  <span className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2 font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#c7d0c9]" key={label}>
-                    {label}
-                  </span>
-                ))}
-              </div>
             </div>
 
             <div className="rounded-xl border border-white/10 bg-[#17221c] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.28)]">
