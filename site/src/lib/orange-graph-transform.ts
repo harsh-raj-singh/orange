@@ -74,20 +74,25 @@ function backendNodeType(node: BackendNode) {
 function isIdentityLike(node: BackendNode) {
   const properties = node.properties ?? {};
   const rawType = backendNodeType(node).toLowerCase();
+  const knowledgeTypes = new Set(["problem", "solution", "attempt", "artifact", "concept"]);
+
+  if (rawType === "session" || rawType === "user") {
+    return true;
+  }
+
+  if (knowledgeTypes.has(rawType)) {
+    return false;
+  }
+
   const label = [
     asString(node.label),
     asString(properties.label),
     asString(properties.name),
     asString(properties.email),
-    asString(properties.user_email),
     asString(properties.canonical_label),
   ]
     .filter(Boolean)
     .join(" ");
-
-  if (rawType === "session" || rawType === "user") {
-    return true;
-  }
 
   if (/\b[\w.%+-]+@[\w.-]+\.[a-z]{2,}\b/i.test(label)) {
     return true;
