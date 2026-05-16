@@ -3,23 +3,7 @@ from collections import defaultdict
 
 from core.agents.extraction_outputs import ExtractedSolution
 from core.agents.llm_caller import call_llm_json
-
-SYSTEM_PROMPT = """You are a solution relationship agent.
-
-You will be given ordered solution attempts for the same problem label.
-For each consecutive pair, decide whether the later attempt is:
-- a refinement of the previous attempt (same approach, modified), or
-- a fresh independent attempt (different approach).
-
-Output JSON only in this format:
-{"pairwise_refinements": [true, false]}
-
-Rules:
-- The boolean list length must be exactly N-1 where N is number of attempts.
-- Index 0 corresponds to (attempt 2 vs attempt 1), index 1 to (attempt 3 vs attempt 2), etc.
-- Use true only when the later attempt clearly modifies the same approach.
-- If uncertain, use false.
-"""
+from core.agents.solution_agent.prompts import SOLUTION_RELATIONSHIP_SYSTEM_PROMPT
 
 
 def _parse_pairwise_refinements(result: object, expected_len: int) -> list[bool]:
@@ -73,7 +57,7 @@ async def _run_solution_relationship_agent(
         )
 
         result = await call_llm_json(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=SOLUTION_RELATIONSHIP_SYSTEM_PROMPT,
             user_content=(
                 f"PROBLEM LABEL: {ordered_group[0].addresses_problem_label}\n"
                 f"ORDERED ATTEMPTS:\n{attempts_payload}"

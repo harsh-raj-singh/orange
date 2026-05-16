@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from core.agents.pii_scrubber.prompts import PII_SCRUBBER_SYSTEM_PROMPT
+from core.agents.pii_scrubber.prompts import build_pii_scrubber_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +69,7 @@ def _fallback_scrub(transcript: str, known_pii: list[str]) -> str:
 
 
 async def _call_llm(llm: Any, transcript: str, known_pii: list[str]) -> str:
-    prompt = (
-        f"{PII_SCRUBBER_SYSTEM_PROMPT}\n\n"
-        f"Known PII to scrub if present:\n{chr(10).join(known_pii) or '- none provided'}\n\n"
-        f"Transcript:\n{transcript}"
-    )
+    prompt = build_pii_scrubber_prompt(transcript, known_pii)
     if hasattr(llm, "scrub_pii_transcript"):
         result = llm.scrub_pii_transcript(transcript=transcript, prompt=prompt, known_pii=known_pii)
     elif hasattr(llm, "complete"):

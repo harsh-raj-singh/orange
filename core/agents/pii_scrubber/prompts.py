@@ -22,3 +22,22 @@ If a sentence cannot be kept without revealing PII, remove it entirely.
 
 Return only the cleaned transcript.
 """.strip()
+
+
+PII_SCRUBBER_USER_PROMPT_TEMPLATE = """
+{system_prompt}
+
+Known PII to scrub if present:
+{known_pii}
+
+Transcript:
+{transcript}
+""".strip()
+
+
+def build_pii_scrubber_prompt(transcript: str, known_pii: list[str]) -> str:
+    return PII_SCRUBBER_USER_PROMPT_TEMPLATE.format(
+        system_prompt=PII_SCRUBBER_SYSTEM_PROMPT,
+        known_pii="\n".join(known_pii) or "- none provided",
+        transcript=transcript,
+    )

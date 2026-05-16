@@ -1,24 +1,8 @@
 import json
 
 from core.agents.extraction_outputs import EnrichedProblem, SolutionAgentOutput
+from core.agents.issue_agent.prompts import CONTEXT_STITCHER_SYSTEM_PROMPT
 from core.agents.llm_caller import call_llm_json
-
-SYSTEM_PROMPT = """You are a context stitching agent. Your job is to enrich each problem node with the complete history of solution attempts that preceded it.
-
-For each problem, find all solutions that were applied BEFORE this problem's first_seen_turn. Write a cumulative prior_solution_contexts list - one string per solution attempt, ordered oldest first.
-
-Each string must contain:
-- Attempt number and outcome (e.g. "Attempt 1 (FAILED):")
-- What the solution tried to do (complete description)
-- The full in_depth_summary of the solution
-- Why it failed or what it partially fixed
-
-Root problems (no parent, first in session) will have empty prior_solution_contexts.
-
-Output JSON array, one entry per problem in the same order as input:
-[{"segment_id": "p1", "prior_solution_contexts": []}]
-
-Be thorough in the summaries - this context will be the only information available when this problem is retrieved in future sessions without graph traversal."""
 
 
 async def run_context_stitcher(
@@ -53,7 +37,7 @@ async def run_context_stitcher(
     )
 
     result = await call_llm_json(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=CONTEXT_STITCHER_SYSTEM_PROMPT,
         user_content=f"PROBLEMS:\n{problems_json}\n\nSOLUTIONS:\n{solutions_json}",
     )
 
