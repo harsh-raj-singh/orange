@@ -403,9 +403,21 @@ class Insight(NodeBase):
         default=None,
         description="Human-readable owner email for user-scoped lookup.",
     )
+    org_id: str | None = Field(
+        default=None,
+        description="Company/org identity for shared company-scoped insights.",
+    )
+    company: str | None = Field(
+        default=None,
+        description="Display company name when supplied by the source profile.",
+    )
     contributed_by: str | None = Field(
         default=None,
         description="Audit-only contributor email for global insights. Never exposed in shared retrieval.",
+    )
+    memory_kind: str = Field(
+        default="technical_insight",
+        description="technical_insight, user_fact, company_fact, preference, or steering.",
     )
     what: str = Field(
         default="",

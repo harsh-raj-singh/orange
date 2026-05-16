@@ -514,6 +514,8 @@ class GraphUpsertEngine:
         scope: str = "user",
         user_email: str | None = None,
         contributed_by: str | None = None,
+        org_id: str | None = None,
+        company: str | None = None,
     ) -> UpsertSummary:
         summary = UpsertSummary()
         if not insights:
@@ -537,13 +539,15 @@ class GraphUpsertEngine:
             insight.scope = scope
             insight.user_id = identity if scope == "user" else None
             insight.user_email = (user_email or identity) if scope == "user" else None
+            insight.org_id = org_id or session.org_id
+            insight.company = company
             insight.contributed_by = contributed_by if scope == "global" else None
             insight.raw_session_id = insight.raw_session_id or session.node_id
             if not insight.node_id or insight.node_id.startswith("node_"):
-                owner = "global" if scope == "global" else identity
+                owner = (org_id or "global") if scope == "global" else identity
                 insight.node_id = insight_node_id_for(f"{scope}:{owner}", session.node_id, insight.display_label, insight.what)
 
-            similar = self._find_similar_insight(insight=insight, user_id=identity, scope=scope)
+            similar = self._find_similar_insight(insight=insight, user_id=identity, scope=scope, org_id=insight.org_id)
             if similar and similar["node_id"] == insight.node_id:
                 summary.insights_skipped += 1
                 continue
@@ -563,6 +567,9 @@ class GraphUpsertEngine:
                 source=session.source,
                 outcome=insight.outcome.value if hasattr(insight.outcome, "value") else str(insight.outcome),
                 tags=list(insight.tags),
+                org_id=insight.org_id,
+                company=insight.company,
+                memory_kind=insight.memory_kind,
             )
             self._run_edge_direct(
                 from_id=session.node_id,
@@ -592,7 +599,10 @@ class GraphUpsertEngine:
             SET i.node_type        = 'Insight',
                 i.user_id          = $user_id,
                 i.user_email       = $user_email,
+                i.org_id           = $org_id,
+                i.company          = $company,
                 i.contributed_by   = $contributed_by,
+                i.memory_kind      = $memory_kind,
                 i.what             = $what,
                 i.why              = $why,
                 i.how              = $how,
@@ -612,7 +622,10 @@ class GraphUpsertEngine:
             scope=insight.scope,
             user_id=insight.user_id,
             user_email=insight.user_email,
+            org_id=insight.org_id,
+            company=insight.company,
             contributed_by=insight.contributed_by,
+            memory_kind=insight.memory_kind,
             what=insight.what,
             why=insight.why,
             how=insight.how,
@@ -633,13 +646,16 @@ class GraphUpsertEngine:
         insight: Insight,
         user_id: str,
         scope: str = "user",
+        org_id: str | None = None,
         threshold: float = 0.88,
     ) -> dict[str, Any] | None:
         document = build_insight_embed_string(insight)
         if not document:
             return None
 
-        where = {"node_type": "Insight", "scope": "global"} if scope == "global" else {
+        if scope == "global" and not org_id:
+            return None
+        where = {"node_type": "Insight", "scope": "global", "org_id": org_id} if scope == "global" else {
             "node_type": "Insight",
             "scope": "user",
             "user_id": user_id,
@@ -660,6 +676,8 @@ class GraphUpsertEngine:
             if not isinstance(metadata, dict):
                 continue
             if metadata.get("node_type") != "Insight" or metadata.get("scope") != scope:
+                continue
+            if scope == "global" and org_id and metadata.get("org_id") != org_id:
                 continue
             if scope == "user" and metadata.get("user_id") != user_id:
                 continue
@@ -1300,6 +1318,9 @@ class GraphUpsertEngine:
         contributed_by: str | None = None,
         outcome: str | None = None,
         tags: list[str] | None = None,
+        org_id: str | None = None,
+        company: str | None = None,
+        memory_kind: str | None = None,
     ) -> None:
         metadata = {
             "node_type": node_type,
@@ -1314,6 +1335,12 @@ class GraphUpsertEngine:
             metadata["user_email"] = user_email or user_id
         if scope == "global" and contributed_by:
             metadata["contributed_by"] = contributed_by
+        if org_id:
+            metadata["org_id"] = org_id
+        if company:
+            metadata["company"] = company
+        if memory_kind:
+            metadata["memory_kind"] = memory_kind
         if source is not None:
             metadata["source"] = _source_value(source)
         if parent_problem_id:

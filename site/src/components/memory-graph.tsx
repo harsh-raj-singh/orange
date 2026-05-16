@@ -352,6 +352,21 @@ export default function MemoryGraph() {
       return "";
     }
   });
+  const [company, setCompany] = useState(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    try {
+      const storedProfile = window.localStorage.getItem("orange-demo-profile");
+      if (!storedProfile) {
+        return "";
+      }
+      const parsed = JSON.parse(storedProfile) as { company?: unknown };
+      return typeof parsed.company === "string" ? parsed.company.trim() : "";
+    } catch {
+      return "";
+    }
+  });
   const graphRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
@@ -369,13 +384,17 @@ export default function MemoryGraph() {
       try {
         const storedProfile = window.localStorage.getItem("orange-demo-profile");
         if (storedProfile) {
-          const parsed = JSON.parse(storedProfile) as { email?: unknown };
+          const parsed = JSON.parse(storedProfile) as { email?: unknown; company?: unknown };
           if (typeof parsed.email === "string") {
             setUserEmail(parsed.email.trim().toLowerCase());
+          }
+          if (typeof parsed.company === "string") {
+            setCompany(parsed.company.trim());
           }
         }
       } catch {
         setUserEmail("");
+        setCompany("");
       }
     }
 
@@ -411,6 +430,9 @@ export default function MemoryGraph() {
       const params = new URLSearchParams({ scope });
       if (userEmail) {
         params.set("user_email", userEmail);
+      }
+      if (company) {
+        params.set("company", company);
       }
       const response = await fetch(`/api/demo/memory-graph?${params.toString()}`, {
         cache: "no-store",
@@ -461,7 +483,7 @@ export default function MemoryGraph() {
         setIsRefreshing(false);
       }
     }
-  }, [resolveOverlaps, scope, selectedId, userEmail]);
+  }, [company, resolveOverlaps, scope, selectedId, userEmail]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => {
@@ -516,7 +538,11 @@ export default function MemoryGraph() {
     setDetailLoadingId(node.id);
 
     try {
-      const response = await fetch(`/api/demo/memory-graph/${encodeURIComponent(node.id)}?scope=${scope}`, {
+      const params = new URLSearchParams({ scope });
+      if (company) {
+        params.set("company", company);
+      }
+      const response = await fetch(`/api/demo/memory-graph/${encodeURIComponent(node.id)}?${params.toString()}`, {
         cache: "no-store",
       });
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from core.agents.orchestrator import run_extraction_pipeline
 from core.ingestion import SessionIngestionRequest, normalize_ingestion_request
@@ -37,6 +38,10 @@ logger = logging.getLogger(__name__)
 # H6: For now store_session is implemented synchronously (no background queue)
 # to keep deterministic behavior in tests. Production can switch to async queueing.
 _STORE_SESSION_CACHE: dict[tuple[str, str, str], StoreSessionResponse] = {}
+
+
+def _clean_org_id(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
 
 
 def _run_neo4j(neo4j: object, query: str, **params):
@@ -160,6 +165,9 @@ def _fetch_insight_node(neo4j, node_id: str) -> dict | None:
         RETURN
           i.display_label AS display_label,
           i.display_summary AS display_summary,
+          i.memory_kind AS memory_kind,
+          i.org_id AS org_id,
+          i.company AS company,
           i.what AS what,
           i.why AS why,
           i.how AS how,
@@ -185,6 +193,7 @@ async def handle_ping_context(
     if not user_id:
         raise ValueError("user_id is required")
     user_email = (getattr(req, "user_email", None) or "").strip().lower()
+    org_id = _clean_org_id(getattr(req, "org_id", None) or getattr(req, "company", None))
     scope = (getattr(req, "scope", "both") or "both").strip().lower()
     if scope not in {"user", "global", "both"}:
         raise ValueError("scope must be one of: user, global, both")
@@ -203,7 +212,7 @@ async def handle_ping_context(
             )
         )
     if scope in {"global", "both"}:
-        scoped_results.extend(_query_global_vectors(chroma=chroma, query=query, limit=3))
+        scoped_results.extend(_query_global_vectors(chroma=chroma, query=query, limit=3, org_id=org_id))
 
     matched_nodes: list[MatchedNode] = []
     node_ids_used: list[str] = []
@@ -330,16 +339,21 @@ def _query_user_vectors(
     return _flatten_chroma_hits(result, default_scope="user")
 
 
-def _query_global_vectors(*, chroma: object, query: str, limit: int) -> list[tuple[str, dict, float]]:
+def _query_global_vectors(*, chroma: object, query: str, limit: int, org_id: str = "") -> list[tuple[str, dict, float]]:
+    if not org_id:
+        return []
     collection = get_or_create_global_collection(chroma)
     try:
-        result = collection.query(query_texts=[query], n_results=limit)
+        result = collection.query(query_texts=[query], n_results=limit, where={"scope": "global", "org_id": org_id})
     except Exception:
-        return []
+        try:
+            result = collection.query(query_texts=[query], n_results=max(10, limit))
+        except Exception:
+            return []
     return [
         (node_id, {**metadata, "scope": "global"}, distance)
         for node_id, metadata, distance in _flatten_chroma_hits(result, default_scope="global")
-        if metadata.get("scope") in (None, "global")
+        if metadata.get("scope") in (None, "global") and metadata.get("org_id") == org_id
     ][:limit]
 
 
@@ -405,6 +419,10 @@ async def handle_store_session(
         "client_metadata": req.client_metadata or {},
         "tool_metadata": req.tool_metadata or {},
     }
+    company = (req.company or metadata.get("company") or "").strip() if isinstance(req.company or metadata.get("company"), str) else ""
+    org_id = _clean_org_id(req.org_id or company)
+    if company:
+        metadata["company"] = company
     normalized = normalize_ingestion_request(
         SessionIngestionRequest(
             transcript=transcript,
@@ -413,7 +431,7 @@ async def handle_store_session(
             user_email=req.user_email,
             session_id=req.session_id,
             external_session_id=req.external_session_id,
-            org_id=req.org_id,
+            org_id=org_id or req.org_id,
             started_at=req.started_at,
             ended_at=req.ended_at,
             participants=req.participants,

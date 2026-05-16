@@ -92,6 +92,7 @@ class InsightDraft(BaseModel):
     why: str | None = None
     how: str | None = None
     outcome: str = "exploratory"
+    memory_kind: str = "technical_insight"
     tags: list[str] = Field(default_factory=list)
     display_label: str
     display_summary: str

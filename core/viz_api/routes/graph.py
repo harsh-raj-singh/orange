@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
@@ -18,14 +20,27 @@ from core.viz_api.dependencies import get_neo4j
 router = APIRouter()
 
 
+def _clean_org_id(value: str | None) -> str | None:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+    return cleaned or None
+
+
 @router.get("/full")
 async def full_graph(
     user_id: str | None = None,
     user_email: str | None = None,
+    org_id: str | None = None,
+    company: str | None = None,
     scope: str = "both",
 ) -> JSONResponse:
     try:
-        data = get_full_graph(get_neo4j(), user_id=user_id, user_email=user_email, scope=scope)
+        data = get_full_graph(
+            get_neo4j(),
+            user_id=user_id,
+            user_email=user_email,
+            org_id=_clean_org_id(org_id or company),
+            scope=scope,
+        )
         return JSONResponse(data)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"error": str(exc)})

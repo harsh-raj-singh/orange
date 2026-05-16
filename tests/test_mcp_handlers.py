@@ -153,6 +153,7 @@ def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_n
                     "scope": "global",
                     "node_type": "Problem",
                     "canonical_label": "shared cors problem",
+                    "org_id": "acme",
                     "contributed_by": "someone@example.com",
                 }
             ]],
@@ -163,6 +164,7 @@ def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_n
         query="cors problem",
         user_id="u1",
         user_email="dev@example.com",
+        org_id="acme",
         source="cursor",
         scope="both",
     )
@@ -174,7 +176,7 @@ def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_n
     assert resp.matched_nodes[0].node_data["global_exists"] is True
     assert "contributed_by" not in resp.matched_nodes[0].node_data
     assert mock_chroma.query_calls[0]["where"] == {"scope": "user", "user_email": "dev@example.com"}
-    assert "where" not in mock_chroma.query_calls[1]
+    assert mock_chroma.query_calls[1]["where"] == {"scope": "global", "org_id": "acme"}
 
 
 def test_ping_context_global_scope_hides_contributor_and_uses_global_threshold(mock_neo4j, mock_chroma) -> None:
@@ -193,18 +195,19 @@ def test_ping_context_global_scope_hides_contributor_and_uses_global_threshold(m
                 "scope": "global",
                 "node_type": "Problem",
                 "canonical_label": "global redis problem",
+                "org_id": "acme",
                 "contributed_by": "someone@example.com",
             }
         ]],
     }
 
-    req = PingContextRequest(query="redis", user_id="u1", source="cursor", min_score=0.95, scope="global")
+    req = PingContextRequest(query="redis", user_id="u1", source="cursor", min_score=0.95, scope="global", org_id="acme")
     resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
 
     assert len(resp.matched_nodes) == 1
     assert resp.matched_nodes[0].source == "global"
     assert "contributed_by" not in resp.matched_nodes[0].node_data
-    assert "where" not in mock_chroma.query_calls[0]
+    assert mock_chroma.query_calls[0]["where"] == {"scope": "global", "org_id": "acme"}
 
 
 def test_ping_context_invalid_source_raises(mock_neo4j, mock_chroma) -> None:

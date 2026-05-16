@@ -28,6 +28,7 @@ def build_insight_embed_string(insight: Insight) -> str:
         insight.what,
         insight.why or "",
         insight.how or "",
+        insight.memory_kind,
         " ".join(insight.tags),
     ]
     return " ".join(part.strip() for part in parts if part and part.strip()).strip()

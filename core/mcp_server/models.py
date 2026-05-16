@@ -12,6 +12,8 @@ class PingContextRequest:
     source: str
     min_score: float = 0.70
     user_email: str | None = None
+    org_id: str | None = None
+    company: str | None = None
     scope: str = "both"
 
 
@@ -41,6 +43,7 @@ class StoreSessionRequest:
     session_id: str = ""
     external_session_id: str | None = None
     org_id: str | None = None
+    company: str | None = None
     started_at: datetime | str | int | float | None = None
     ended_at: datetime | str | int | float | None = None
     participants: list[str | dict[str, Any]] = field(default_factory=list)

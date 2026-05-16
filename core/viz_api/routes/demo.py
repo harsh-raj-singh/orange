@@ -97,6 +97,8 @@ async def complete_conversation(payload: DemoCompletePayload) -> JSONResponse:
         source="cursor",
         user_id=user_id,
         user_email=payload.profile.email.strip().lower() if payload.profile and payload.profile.email else None,
+        org_id=payload.profile.company.strip().lower() if payload.profile and payload.profile.company else None,
+        company=payload.profile.company.strip() if payload.profile and payload.profile.company else None,
         session_id=payload.sessionId or "",
         contribute_to_global=payload.contribute_to_global,
         participants=[
@@ -135,6 +137,8 @@ async def ping_context(payload: DemoPingPayload) -> JSONResponse:
         source=payload.source,
         min_score=payload.min_score,
         user_email=payload.profile.email.strip().lower() if payload.profile and payload.profile.email else None,
+        org_id=payload.profile.company.strip().lower() if payload.profile and payload.profile.company else None,
+        company=payload.profile.company.strip() if payload.profile and payload.profile.company else None,
         scope=payload.scope,
     )
     try:

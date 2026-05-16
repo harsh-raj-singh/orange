@@ -10,10 +10,15 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const scope = normalizeDemoGraphScope(params.get("scope"));
   const userEmail = params.get("user_email")?.trim().toLowerCase();
+  const company = params.get("company")?.trim();
   const backendParams = new URLSearchParams({ scope });
   if (userEmail) {
     backendParams.set("user_email", userEmail);
     backendParams.set("user_id", userEmail);
+  }
+  if (company) {
+    backendParams.set("company", company);
+    backendParams.set("org_id", company.toLowerCase());
   }
 
   return NextResponse.json(

@@ -5,12 +5,16 @@ import re
 from typing import Any
 
 from core.agents.extraction_outputs import InsightDraft
-from core.agents.insight_extractor.prompts import INSIGHT_EXTRACTOR_SYSTEM_PROMPT
+from core.agents.insight_extractor.prompts import (
+    GLOBAL_INSIGHT_EXTRACTOR_SYSTEM_PROMPT,
+    USER_INSIGHT_EXTRACTOR_SYSTEM_PROMPT,
+)
 from core.agents.llm_caller import call_llm_json
 
 logger = logging.getLogger(__name__)
 
 _OUTCOMES = {"resolved", "exploratory", "partial", "abandoned"}
+_MEMORY_KINDS = {"technical_insight", "user_fact", "company_fact", "preference", "steering"}
 
 
 def _compact_label(text: str, fallback: str) -> str:
@@ -36,16 +40,34 @@ def _tags_from(transcript: str) -> list[str]:
         "vercel",
         "next.js",
         "typescript",
+        "markdown",
+        "md-files",
+        "company-memory",
+        "aws-glue",
     ]
     lowered = transcript.lower()
     return [tag for tag in candidates if tag in lowered][:6]
 
 
-def _fallback_insights(transcript: str) -> list[InsightDraft]:
+def _fallback_insights(transcript: str, *, scope: str = "user", company: str | None = None) -> list[InsightDraft]:
     lowered = transcript.lower()
     tags = _tags_from(transcript)
     if "reverse a string" in lowered and "error" not in lowered and "failed" not in lowered:
         return []
+    if scope == "global" and not (company or "").strip():
+        return []
+    if scope == "global" and not any(
+        token in lowered for token in ("our company", "our companies", "company uses", "we use", "aws glue", "glue issue")
+    ):
+        return []
+
+    memory_kind = "technical_insight"
+    if any(token in lowered for token in ("our company", "our companies", "company uses", "we use", "we store", "memory source")):
+        memory_kind = "company_fact"
+    if scope == "user" and any(token in lowered for token in ("prefer", "make it", "should feel", "only use", "required field")):
+        memory_kind = "steering"
+    if scope == "user" and any(token in lowered for token in ("i use", "my workflow", "my company", "our company")):
+        memory_kind = "user_fact" if memory_kind == "technical_insight" else memory_kind
 
     outcome = "exploratory"
     if any(token in lowered for token in ("fixed", "resolved", "worked", "success")):
@@ -60,6 +82,9 @@ def _fallback_insights(transcript: str) -> list[InsightDraft]:
     how = next((s[:240] for s in sentences if re.search(r"\b(fixed|resolved|tried|updated|downgraded|used)\b", s, re.I)), None)
     why = next((s[:240] for s in sentences if re.search(r"\b(root cause|because|due to|incompatib)\b", s, re.I)), None)
     label_source = how or what
+    if ".md" in lowered or "markdown" in lowered:
+        tags = sorted(set([*tags, "markdown", "memory"]))
+        label_source = "Markdown files for memory"
     label = _compact_label(label_source, "Developer session insight")
     return [
         InsightDraft(
@@ -67,6 +92,7 @@ def _fallback_insights(transcript: str) -> list[InsightDraft]:
             why=why,
             how=how,
             outcome=outcome,
+            memory_kind=memory_kind,
             tags=tags,
             display_label=label,
             display_summary=(how or what)[:260],
@@ -81,22 +107,26 @@ def _normalize_item(item: dict[str, Any]) -> InsightDraft | None:
         return None
     if draft.outcome not in _OUTCOMES:
         draft.outcome = "exploratory"
+    if draft.memory_kind not in _MEMORY_KINDS:
+        draft.memory_kind = "technical_insight"
     draft.tags = [str(tag).strip() for tag in draft.tags if str(tag).strip()]
     return draft
 
 
-async def extract_insights(transcript: str) -> list[InsightDraft]:
+async def extract_insights(transcript: str, *, scope: str = "user", company: str | None = None) -> list[InsightDraft]:
+    system_prompt = GLOBAL_INSIGHT_EXTRACTOR_SYSTEM_PROMPT if scope == "global" else USER_INSIGHT_EXTRACTOR_SYSTEM_PROMPT
+    user_content = f"Company/org: {company or 'unknown'}\n\nTranscript:\n{transcript}" if scope == "global" else transcript
     try:
-        result = await call_llm_json(INSIGHT_EXTRACTOR_SYSTEM_PROMPT, transcript)
+        result = await call_llm_json(system_prompt, user_content)
         raw_items = result if isinstance(result, list) else result.get("insights", [])
         insights = [_normalize_item(item) for item in raw_items if isinstance(item, dict)]
         drafts = [insight for insight in insights if insight is not None]
     except Exception as exc:  # noqa: BLE001
         logger.warning("insight_extractor_fallback", extra={"error": str(exc)})
-        drafts = _fallback_insights(transcript)
+        drafts = _fallback_insights(transcript, scope=scope, company=company)
 
     logger.info(
         "insight_extractor_output",
-        extra={"insight_count": len(drafts), "labels": [draft.display_label for draft in drafts]},
+        extra={"scope": scope, "company": company, "insight_count": len(drafts), "labels": [draft.display_label for draft in drafts]},
     )
     return drafts

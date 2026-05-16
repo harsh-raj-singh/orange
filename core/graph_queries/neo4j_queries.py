@@ -174,6 +174,7 @@ def get_full_graph(
     *,
     scope: str = "both",
     user_email: str | None = None,
+    org_id: str | None = None,
     include_raw: bool = False,
 ) -> dict:
     """
@@ -186,8 +187,7 @@ def get_full_graph(
       (
         $scope = 'both'
         AND (
-          n.scope = 'global'
-          OR n.scope IS NULL
+          ($org_id IS NOT NULL AND n.scope = 'global' AND n.org_id = $org_id)
           OR (
             n.scope = 'user'
             AND (
@@ -199,7 +199,7 @@ def get_full_graph(
           )
         )
       )
-      OR ($scope = 'global' AND n.scope = 'global')
+      OR ($scope = 'global' AND $org_id IS NOT NULL AND n.scope = 'global' AND n.org_id = $org_id)
       OR (
         $scope = 'user'
         AND (
@@ -218,8 +218,7 @@ def get_full_graph(
       (
         $scope = 'both'
         AND (
-          m.scope = 'global'
-          OR m.scope IS NULL
+          ($org_id IS NOT NULL AND m.scope = 'global' AND m.org_id = $org_id)
           OR (
             m.scope = 'user'
             AND (
@@ -231,7 +230,7 @@ def get_full_graph(
           )
         )
       )
-      OR ($scope = 'global' AND m.scope = 'global')
+      OR ($scope = 'global' AND $org_id IS NOT NULL AND m.scope = 'global' AND m.org_id = $org_id)
       OR (
         $scope = 'user'
         AND (
@@ -254,6 +253,7 @@ def get_full_graph(
         query,
         user_id=user_id,
         user_email=user_email,
+        org_id=org_id,
         scope=scope if scope in {"user", "global", "both"} else "both",
     )
     nodes_by_id: dict[str, dict[str, Any]] = {}

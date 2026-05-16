@@ -151,6 +151,8 @@ async def ping_context(
     source: str,
     scope: str = "both",
     user_email: str | None = None,
+    org_id: str | None = None,
+    company: str | None = None,
     min_score: float = 0.70,
 ) -> dict:
     req = PingContextRequest(
@@ -159,6 +161,8 @@ async def ping_context(
         source=source,
         scope=scope,
         user_email=user_email,
+        org_id=org_id,
+        company=company,
         min_score=min_score,
     )
     resp = await handle_ping_context(req, neo4j=get_neo4j(), chroma=get_chroma())
@@ -173,6 +177,7 @@ async def store_session(
     user_email: str | None = None,
     session_id: str = "",
     org_id: str | None = None,
+    company: str | None = None,
     external_session_id: str | None = None,
     started_at: str | None = None,
     ended_at: str | None = None,
@@ -194,6 +199,7 @@ async def store_session(
         session_id=session_id,
         external_session_id=external_session_id,
         org_id=org_id,
+        company=company,
         started_at=started_at,
         ended_at=ended_at,
         participants=participants or [],
