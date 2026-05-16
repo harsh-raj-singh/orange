@@ -1,12 +1,4 @@
-ISSUE_AGENT_USER_SCOPE_PROMPT = """
-You are extracting memory for a private user session. Include all relevant context,
-including personal details, environment specifics, and team/project references.
-These are private to this user only.
-""".strip()
+from core.agents.base_prompts import USER_SCOPE_EXTRACTION_PROMPT, global_scope_extraction_prompt
 
-ISSUE_AGENT_GLOBAL_SCOPE_PROMPT = """
-You are extracting memory for a shared global knowledge base. The transcript has
-already been PII-scrubbed. Do not add any personal, organizational, or location
-details back in. Extract only technical problem patterns that would be useful to
-any engineer facing the same problem, regardless of their team or company.
-""".strip()
+ISSUE_AGENT_USER_SCOPE_PROMPT = USER_SCOPE_EXTRACTION_PROMPT
+ISSUE_AGENT_GLOBAL_SCOPE_PROMPT = global_scope_extraction_prompt("problem")

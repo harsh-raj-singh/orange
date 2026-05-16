@@ -24,7 +24,6 @@ Usage (Socket Mode — no public URL needed):
 
 import os
 import sys
-import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -229,8 +228,6 @@ def handle_orange_stop(ack, say, command):
     ack()
 
     channel_id = command["channel_id"]
-    user_id = command["user_id"]
-
     with session_lock:
         if channel_id not in active_sessions:
             say(
@@ -247,8 +244,8 @@ def handle_orange_stop(ack, say, command):
 
     if msg_count == 0:
         say(
-            f"🍊 Recording stopped, but no messages were captured.\n"
-            f"Nothing to process. Type `/orange` to start a new recording."
+            "🍊 Recording stopped, but no messages were captured.\n"
+            "Nothing to process. Type `/orange` to start a new recording."
         )
         return
 
@@ -405,7 +402,7 @@ def handle_orange_status(ack, say, command):
         f"• Messages captured: `{session['message_count']}`\n"
         f"• Chat ID: `{session['chat_id']}`\n\n"
         f"*Target stores:*\n" + "\n".join(f"  {s}" for s in stores) + "\n\n"
-        f"Type `/orange-stop` to stop recording and run extraction."
+        "Type `/orange-stop` to stop recording and run extraction."
     )
 
 

@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 """Backfill vector payload fields from legacy summary keys."""
 
-import os
+from __future__ import annotations
 
 from core.complete_chat_system import ChatCentricMemorySystem
 

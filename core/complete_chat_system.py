@@ -11,16 +11,14 @@ This is the production-ready implementation based on your requirements:
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-import psycopg
 from psycopg.types.json import Json
 from psycopg_pool import ConnectionPool
 from neo4j import GraphDatabase
@@ -798,36 +796,6 @@ class ChatCentricMemorySystem:
             searchable = extracted.get("searchable_summary", {})
             query_intent = searchable.get("query_intent", "")
             solution_summary = searchable.get("solution_summary", "")
-            # H5:REMOVED vec_<chat_id> write path (legacy chat-level vectors)
-            # query_embedding = self.embedding_model.embed(query_intent or solution_summary or "memory")
-            # vector_payload = {
-            #     "chat_id": chat_id,
-            #     "user_id": chat["user_id"],
-            #     "created_at": chat["created_at"],
-            #     "search_query_intent": query_intent,
-            #     "search_solution_summary": solution_summary,
-            #     "search_keywords": searchable.get("keywords", []),
-            #     "graph_node_ids": [],
-            #     "graph_concepts": [],
-            #     "importance_score": extracted.get("importance_score", 0.0),
-            #     "extraction_confidence": extracted.get("extraction_confidence", 0.0),
-            #     "conversation_type": (extracted.get("conversation_metadata", {}) or {}).get("type", "unknown"),
-            #     "extraction_version": extracted.get("extraction_version", self.extraction_config.EXTRACTION_VERSION),
-            #     "context_snippet": solution_summary[:200],
-            # }
-            # vector_id = f"vec_{chat_id}"
-            # try:
-            #     self.vector_store.insert(
-            #         [query_embedding],
-            #         [_sanitize_vector_payload(vector_payload)],
-            #         [vector_id],
-            #     )
-            # except Exception:
-            #     self.vector_store.update(
-            #         vector_id,
-            #         vector=query_embedding,
-            #         payload=_sanitize_vector_payload(vector_payload),
-            #     )
 
             graph_node_ids = []
             importance_score = extracted.get("importance_score", 0.0)
@@ -852,16 +820,6 @@ class ChatCentricMemorySystem:
                         extra={"chat_id": chat_id, "error": str(exc)},
                     )
                     graph_node_ids = []
-                # H5:REMOVED vec_<chat_id> update path after graph augmentation
-                # graph_node_names = graph_result.get("node_names", [])
-                # vector_payload["graph_node_ids"] = graph_node_ids
-                # vector_payload["graph_concepts"] = graph_node_names
-                # self.vector_store.update(
-                #     vector_id,
-                #     vector=query_embedding,
-                #     payload=_sanitize_vector_payload(vector_payload),
-                # )
-
             h3_h4_status = {"status": "skipped", "reason": "not_configured"}
             messages = [m for m in (chat.get("messages") or []) if isinstance(m, dict)]
             full_transcript = "\n".join(
@@ -872,67 +830,16 @@ class ChatCentricMemorySystem:
 
             if self.graph_driver and self.vector_store and full_transcript:
                 try:
-                    from core.agents.runner import run_extraction
-                    from core.graph_schema_v2 import (
-                        ConversationType as GraphConversationType,
-                        Session,
-                        SessionResolutionStatus,
-                        SourceType,
-                    )
-                    from core.graph_upsert.writer import GraphUpsertEngine
-                    from core.source_registry import ConversationType as RunnerConversationType
-
-                    conversation_type_map = {
-                        RunnerConversationType.DEBUGGING: GraphConversationType.DEBUGGING,
-                        RunnerConversationType.BRAINSTORM: GraphConversationType.BRAINSTORMING,
-                        RunnerConversationType.QA: GraphConversationType.LEARNING,
-                        RunnerConversationType.DECISION: GraphConversationType.DECISION_MAKING,
-                        RunnerConversationType.CASUAL: GraphConversationType.GENERAL,
-                    }
+                    from core.agents.orchestrator import run_extraction_pipeline
+                    from core.graph_schema_v2 import SourceType
 
                     source_for_orange_v2 = (
                         SourceType.SLACK
                         if chat.get("memory_request_reason") == "slack_orange_command"
                         else SourceType.STREAMLIT
                     )
-
-                    extraction = asyncio.run(
-                        run_extraction(
-                            session_id=chat_id,
-                            transcript=full_transcript,
-                            source=source_for_orange_v2,
-                        )
-                    )
-                    graph_conversation_type = conversation_type_map.get(
-                        extraction.conversation_type,
-                        GraphConversationType.GENERAL,
-                    )
-
-                    session_node = Session(
-                        node_id=chat_id,
-                        source=source_for_orange_v2,
-                        conversation_type=graph_conversation_type,
-                        resolution_status=SessionResolutionStatus.OPEN,
-                        message_count=len(messages),
-                        title=f"Session {chat_id}",
-                        summary="Processed via Streamlit",
-                    )
-
                     chroma_client = getattr(self.vector_store, "client", self.vector_store)
-                    engine = GraphUpsertEngine(
-                        neo4j=self.graph_driver,
-                        chroma=chroma_client,
-                        llm=self.llm,
-                    )
-                    upsert_summary = engine.upsert(
-                        session=session_node,
-                        user_id=chat["user_id"],
-                        debug_result=extraction.debug_result,
-                        concept_result=extraction.concept_result,
-                    )
-                    # New v2 pipeline - runs in separate thread to avoid nested asyncio.run()
                     import threading
-                    from core.agents.orchestrator import run_extraction_pipeline
 
                     v2_transcript = "\n".join(
                         f"Turn {i+1} [{str(m.get('role') or 'unknown').strip().lower()}]: {(m.get('content') or '').strip()}"
@@ -981,8 +888,10 @@ class ChatCentricMemorySystem:
                         )
                     h3_h4_status = {
                         "status": "processed",
-                        "problems_created": upsert_summary.problems_created,
-                        "problems_merged": upsert_summary.problems_merged,
+                        "problems_created": v2_result["problems_created"],
+                        "solutions_written": v2_result["solutions_written"],
+                        "edges_written": v2_result["edges_written"],
+                        "errors": v2_result["errors"],
                     }
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
@@ -1009,7 +918,6 @@ class ChatCentricMemorySystem:
 
             return {
                 "status": "processed",
-                # H5:REMOVED vec_<chat_id> return path kept as None for compatibility.
                 "vector_id": None,
                 "graph_nodes": len(graph_node_ids),
                 "conversation_type": (extracted.get("conversation_metadata", {}) or {}).get("type"),
