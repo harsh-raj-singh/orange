@@ -74,6 +74,7 @@ def get_chroma() -> Any:
 
     import chromadb
 
-    chroma_path = os.getenv("CHROMA_PATH", "./chroma_db")
+    default_path = "/data/chroma" if os.getenv("RAILWAY_ENVIRONMENT") else "./chroma_db"
+    chroma_path = os.getenv("CHROMA_PATH", default_path)
     _CHROMA_CLIENT = chromadb.PersistentClient(path=chroma_path)
     return _CHROMA_CLIENT

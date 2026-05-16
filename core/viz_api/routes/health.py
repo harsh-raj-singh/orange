@@ -21,6 +21,11 @@ def _run_neo4j_ping(neo4j: object) -> None:
 
 @router.get("/health")
 async def health() -> JSONResponse:
+    return JSONResponse({"status": "ok", "service": "orange-backend"})
+
+
+@router.get("/health/deep")
+async def deep_health() -> JSONResponse:
     neo4j_status = "ok"
     chroma_status = "ok"
 
