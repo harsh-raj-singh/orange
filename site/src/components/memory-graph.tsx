@@ -25,7 +25,6 @@ type MemoryNode = {
 };
 
 type MemoryScopeValue = "user" | "global";
-type MemoryScopeFilter = MemoryScopeValue | "both";
 
 type MemoryEdge = {
   id: string;
@@ -111,10 +110,9 @@ const kindClass: Record<MemoryNode["kind"], string> = {
   Session: "border-[#24352d] bg-[#f6f7f4] text-[#24352d]",
 };
 
-const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
+const scopeOptions: ReadonlyArray<{ value: MemoryScopeValue; label: string }> = [
   { value: "user", label: "My Memory" },
   { value: "global", label: "Global Knowledge" },
-  { value: "both", label: "Both" },
 ];
 
 const scopeNodeClass: Record<MemoryScopeValue, string> = {
@@ -278,7 +276,7 @@ export default function MemoryGraph() {
   const [nodes, setNodes] = useState(memoryNodes);
   const [edges, setEdges] = useState<MemoryEdge[]>(fallbackEdges);
   const [selectedId, setSelectedId] = useState("cors");
-  const [scope, setScope] = useState<MemoryScopeFilter>("both");
+  const [scope, setScope] = useState<MemoryScopeValue>("user");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
@@ -487,7 +485,7 @@ export default function MemoryGraph() {
         <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#5f746b]">
           Memory scope
         </p>
-        <div className="grid grid-cols-3 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
+        <div className="grid grid-cols-2 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
           {scopeOptions.map((option) => (
             <button
               key={option.value}
