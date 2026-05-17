@@ -12,6 +12,7 @@ streamlit==1.40.1
 # Viz API
 fastapi==0.110.1
 uvicorn[standard]==0.40.0
+fastmcp==2.14.3
 
 # Explicit pins for local embeddings + vector + graph support
 sentence-transformers==5.0.0

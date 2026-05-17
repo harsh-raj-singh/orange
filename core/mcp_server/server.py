@@ -7,6 +7,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import os
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any
 
 from core.graph_queries.neo4j_queries import (
@@ -18,6 +19,8 @@ from core.graph_queries.neo4j_queries import (
 from core.graph_upsert.dedup import (
     ORANGE_GLOBAL_VECTOR_COLLECTION,
     ORANGE_USER_VECTOR_COLLECTION,
+    get_or_create_global_collection,
+    get_or_create_user_collection,
 )
 from core.mcp_server.handlers import handle_ping_context, handle_resolve_problem, handle_store_session
 from core.mcp_server.models import (
@@ -38,6 +41,13 @@ _CHROMA_CLIENT: Any | None = None
 _LLM_CLIENT: Any | None = None
 _POSTGRES_STORE: Any | None = None
 _POSTGRES_DISABLED = False
+
+COMPLETION_POLICY = (
+    "Call complete_conversation exactly once when the agent is about to give the final answer for a useful "
+    "work session, or when the user says done, remember this, store this, mark complete, or wrap this. "
+    "Do not call it mid-session. For trivial greetings or generic one-off answers, skip it unless the user "
+    "gave durable facts, preferences, company workflow details, or steering that future agents should remember."
+)
 
 
 class OpenAILLMAdapter:
@@ -72,7 +82,7 @@ def get_neo4j() -> Any:
 
     from neo4j import GraphDatabase
 
-    url = os.getenv("MEMGRAPH_URL") or os.getenv("NEO4J_URL") or os.getenv("MEMGRAPH_BOLT_URL")
+    url = os.getenv("MEMGRAPH_URL") or os.getenv("NEO4J_URL") or os.getenv("NEO4J_URI") or os.getenv("MEMGRAPH_BOLT_URL")
     if not url:
         host = os.getenv("MEMGRAPH_HOST")
         if host:
@@ -82,9 +92,9 @@ def get_neo4j() -> Any:
             url = f"{scheme}://{host}:{port}"
 
     if not url:
-        raise ValueError("Missing MEMGRAPH_URL/NEO4J_URL (or MEMGRAPH_HOST) for MCP server.")
+        raise ValueError("Missing MEMGRAPH_URL/NEO4J_URL/NEO4J_URI (or MEMGRAPH_HOST) for MCP server.")
 
-    username = os.getenv("MEMGRAPH_USERNAME") or os.getenv("NEO4J_USERNAME")
+    username = os.getenv("MEMGRAPH_USERNAME") or os.getenv("NEO4J_USERNAME") or os.getenv("NEO4J_USER")
     password = os.getenv("MEMGRAPH_PASSWORD") or os.getenv("NEO4J_PASSWORD")
 
     if username and password:
@@ -139,25 +149,100 @@ def get_llm() -> Any:
         return _LLM_CLIENT
 
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("NVIDIA_BASE_URL")
-    model = os.getenv("OPENAI_MODEL") or os.getenv("NVIDIA_MODEL") or "meta/llama-3.1-8b-instruct"
+    model = os.getenv("OPENAI_MODEL") or os.getenv("NVIDIA_MODEL") or "gpt-5.4-nano"
     _LLM_CLIENT = OpenAILLMAdapter(api_key=api_key, model=model, base_url=base_url)
     return _LLM_CLIENT
+
+
+def _is_env_configured(*names: str) -> bool:
+    return any(bool(os.getenv(name)) for name in names)
+
+
+def _check_neo4j() -> dict[str, Any]:
+    try:
+        neo4j = get_neo4j()
+        if hasattr(neo4j, "run"):
+            neo4j.run("RETURN 1 AS ok")
+        elif hasattr(neo4j, "session"):
+            with neo4j.session() as session:
+                session.run("RETURN 1 AS ok").consume()
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def _check_chroma() -> dict[str, Any]:
+    try:
+        chroma = get_chroma()
+        user_collection = get_or_create_user_collection(chroma)
+        global_collection = get_or_create_global_collection(chroma)
+        return {
+            "ok": True,
+            "path": os.getenv("CHROMA_PATH", "./chroma_db"),
+            "collections": {
+                ORANGE_USER_VECTOR_COLLECTION: user_collection.count(),
+                ORANGE_GLOBAL_VECTOR_COLLECTION: global_collection.count(),
+            },
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "path": os.getenv("CHROMA_PATH", "./chroma_db"), "error": str(exc)}
+
+
+@_APP.tool()
+async def orange_status() -> dict:
+    """Check whether the Orange MCP server can reach its graph/vector stores and explain the completion policy."""
+
+    neo4j_status = _check_neo4j()
+    chroma_status = _check_chroma()
+    return {
+        "service": "orange-mcp",
+        "ok": bool(neo4j_status.get("ok") and chroma_status.get("ok")),
+        "completion_policy": COMPLETION_POLICY,
+        "environment": {
+            "neo4j_configured": _is_env_configured("MEMGRAPH_URL", "NEO4J_URL", "NEO4J_URI", "MEMGRAPH_HOST"),
+            "neo4j_user_configured": _is_env_configured("MEMGRAPH_USERNAME", "NEO4J_USERNAME", "NEO4J_USER"),
+            "neo4j_password_configured": _is_env_configured("MEMGRAPH_PASSWORD", "NEO4J_PASSWORD"),
+            "openai_or_nvidia_configured": _is_env_configured("OPENAI_API_KEY", "NVIDIA_API_KEY"),
+            "postgres_configured": _is_env_configured("SUPABASE_DB_URL", "POSTGRES_DSN", "DATABASE_URL"),
+            "chroma_path": os.getenv("CHROMA_PATH", "./chroma_db"),
+        },
+        "neo4j": neo4j_status,
+        "chroma": chroma_status,
+        "tools": [
+            "orange_status",
+            "ping_context",
+            "complete_conversation",
+            "store_session",
+            "inspect_graph",
+            "get_node",
+            "get_session_graph",
+            "list_sessions",
+            "chroma_peek",
+        ],
+    }
 
 
 @_APP.tool()
 async def ping_context(
     query: str,
-    user_id: str,
-    source: str,
+    user_id: str = "",
+    source: str = "mcp",
     scope: str = "both",
     user_email: str | None = None,
     org_id: str | None = None,
     company: str | None = None,
     min_score: float = 0.70,
 ) -> dict:
+    """Retrieve relevant Orange memory before answering a user.
+
+    Use this near the start of a coding-agent turn. Pass the current user request as `query`,
+    `user_email` for private memory, and `company` or `org_id` for company-scoped shared memory.
+    """
+
+    identity = (user_id or user_email or "").strip()
     req = PingContextRequest(
         query=query,
-        user_id=user_id,
+        user_id=identity,
         source=source,
         scope=scope,
         user_email=user_email,
@@ -167,6 +252,63 @@ async def ping_context(
     )
     resp = await handle_ping_context(req, neo4j=get_neo4j(), chroma=get_chroma())
     return asdict(resp)
+
+
+@_APP.tool()
+async def complete_conversation(
+    transcript: str = "",
+    source: str = "mcp",
+    user_email: str | None = None,
+    company: str | None = None,
+    user_id: str = "",
+    session_id: str = "",
+    org_id: str | None = None,
+    messages: list[dict[str, Any]] | None = None,
+    client_name: str | None = None,
+    client_version: str | None = None,
+    source_url: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    contribute_to_global: bool = True,
+) -> dict:
+    """Mark a conversation as complete and write durable Orange memory.
+
+    This is the preferred write tool for Claude Code, Codex, Cursor, and other MCP clients.
+    Call it once at the end of a useful session using the full transcript or message list.
+    Orange triage may still skip storage if the conversation contains no durable memory.
+    """
+
+    identity = (user_email or user_id or "").strip()
+    req = StoreSessionRequest(
+        transcript=transcript,
+        source=source,
+        user_id=identity,
+        user_email=user_email,
+        session_id=session_id,
+        org_id=org_id,
+        company=company,
+        ended_at=datetime.now(timezone.utc).isoformat(),
+        messages=messages or [],
+        client_name=client_name,
+        client_version=client_version,
+        source_url=source_url,
+        metadata={
+            **(metadata or {}),
+            "completion_policy": "agent_final_answer_or_user_done_signal",
+            "completed_via": "complete_conversation",
+        },
+        contribute_to_global=contribute_to_global,
+    )
+    resp = await handle_store_session(
+        req,
+        neo4j=get_neo4j(),
+        chroma=get_chroma(),
+        llm=get_llm(),
+        postgres_store=get_postgres_store(),
+    )
+    payload = asdict(resp)
+    payload["completion_policy"] = COMPLETION_POLICY
+    payload["stored"] = bool(payload.get("insights_stored")) and not payload.get("errors")
+    return payload
 
 
 @_APP.tool()
@@ -191,6 +333,8 @@ async def store_session(
     metadata: dict[str, Any] | None = None,
     contribute_to_global: bool = True,
 ) -> dict:
+    """Low-level ingestion tool. Prefer complete_conversation for agent/client integrations."""
+
     req = StoreSessionRequest(
         transcript=transcript,
         source=source,
@@ -224,6 +368,8 @@ async def store_session(
 
 @_APP.tool()
 async def resolve_problem(session_id: str, user_id: str, problem_label: str, solution_that_worked: str) -> dict:
+    """Legacy compatibility tool for old Problem/Solution graphs; Insight extraction is the current path."""
+
     req = ResolveProblemRequest(
         session_id=session_id,
         user_id=user_id,
@@ -236,26 +382,36 @@ async def resolve_problem(session_id: str, user_id: str, problem_label: str, sol
 
 @_APP.tool()
 async def inspect_graph(user_id: str | None = None) -> dict:
+    """Inspect the whole graph, optionally filtered by user_id/email."""
+
     return get_full_graph(get_neo4j(), user_id=user_id)
 
 
 @_APP.tool()
 async def get_node(node_id: str) -> dict:
+    """Return one graph node with its immediate neighborhood."""
+
     return get_node_with_neighborhood(get_neo4j(), node_id=node_id)
 
 
 @_APP.tool()
 async def get_session_graph(session_id: str) -> dict:
+    """Return the subgraph produced by one stored session."""
+
     return get_session_subgraph(get_neo4j(), session_id=session_id)
 
 
 @_APP.tool()
 async def list_sessions(user_id: str | None = None) -> list:
+    """List stored Orange sessions, optionally filtered by user_id/email."""
+
     return get_all_sessions(get_neo4j(), user_id=user_id)
 
 
 @_APP.tool()
 async def chroma_peek(limit: int = 10, scope: str = "user") -> dict:
+    """Inspect vector collection contents for debugging retrieval."""
+
     collection_name = ORANGE_GLOBAL_VECTOR_COLLECTION if scope == "global" else ORANGE_USER_VECTOR_COLLECTION
     collection = get_chroma().get_collection(collection_name)
     results = collection.peek(limit)

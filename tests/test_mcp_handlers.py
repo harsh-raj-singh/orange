@@ -240,6 +240,38 @@ def test_store_session_returns_summary(monkeypatch: pytest.MonkeyPatch, mock_neo
     assert calls[0]["source"].value == "cursor"
 
 
+def test_store_session_accepts_codex_source_and_email_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_neo4j,
+    mock_chroma,
+) -> None:
+    calls: list[dict] = []
+
+    async def fake_run_extraction_pipeline(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {"insights_stored": 1, "skipped_reason": None}
+
+    monkeypatch.setattr("core.mcp_server.handlers.run_extraction_pipeline", fake_run_extraction_pipeline)
+
+    req = StoreSessionRequest(
+        source="codex",
+        user_email="dev@example.com",
+        company="Acme",
+        session_id="codex-session",
+        messages=[
+            {"role": "user", "content": "Our company uses .md files for memory."},
+            {"role": "assistant", "content": "Got it."},
+        ],
+    )
+    resp = asyncio.run(handle_store_session(req, neo4j=mock_neo4j, chroma=mock_chroma, llm=None))
+
+    assert resp.session_id == "codex-session"
+    assert resp.insights_stored == 1
+    assert calls[0]["source"].value == "codex"
+    assert calls[0]["user_id"] == "dev@example.com"
+    assert calls[0]["normalized_session"].org_id == "acme"
+
+
 def test_store_session_records_normalized_session_in_postgres(
     monkeypatch: pytest.MonkeyPatch,
     mock_neo4j,
