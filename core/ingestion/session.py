@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from core.graph_schema_v2 import SourceType
 
-KNOWN_SOURCES = {"mcp", "slack", "cursor", "claude", "gmail", "streamlit"}
+KNOWN_SOURCES = {"mcp", "codex", "slack", "cursor", "claude", "gmail", "streamlit"}
 ROLE_ALIASES = {
     "agent": "assistant",
     "ai": "assistant",

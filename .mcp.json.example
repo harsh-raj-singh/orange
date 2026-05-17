@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "orange": {
+      "type": "stdio",
+      "command": "${ORANGE_PYTHON:-/absolute/path/to/orange/venv311/bin/python}",
+      "args": ["-m", "core.mcp_server.server"],
+      "env": {
+        "PYTHONPATH": "${ORANGE_ROOT:-/absolute/path/to/orange}"
+      }
+    }
+  }
+}

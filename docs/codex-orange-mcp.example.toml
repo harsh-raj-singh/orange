@@ -1,0 +1,10 @@
+[mcp_servers.orange]
+command = "/absolute/path/to/orange/venv311/bin/python"
+args = ["-m", "core.mcp_server.server"]
+cwd = "/absolute/path/to/orange"
+startup_timeout_sec = 20
+tool_timeout_sec = 180
+enabled = true
+
+[mcp_servers.orange.env]
+PYTHONPATH = "/absolute/path/to/orange"

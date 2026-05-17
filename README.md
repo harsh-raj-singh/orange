@@ -223,12 +223,15 @@ PYTHONPATH=. python -m core.mcp_server.server
 ```
 
 This runs Orange in stdio mode for MCP-compatible clients.
+See [`docs/MCP.md`](docs/MCP.md) for Claude Code and Codex setup snippets.
 
 ## MCP Tools
 
 The MCP server currently exposes:
 
+- `orange_status`
 - `ping_context`
+- `complete_conversation`
 - `store_session`
 - `resolve_problem`
 - `inspect_graph`
@@ -237,7 +240,7 @@ The MCP server currently exposes:
 - `list_sessions`
 - `chroma_peek`
 
-`resolve_problem` remains for compatibility; the current memory write path is session-level Insight extraction.
+For coding agents, the happy path is `ping_context` before answering and `complete_conversation` once when the session is done. `resolve_problem` remains for compatibility; the current memory write path is session-level Insight extraction.
 
 ## Deployed Demo
 
