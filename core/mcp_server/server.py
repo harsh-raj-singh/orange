@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import os
+import json
+from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
@@ -41,6 +43,7 @@ _CHROMA_CLIENT: Any | None = None
 _LLM_CLIENT: Any | None = None
 _POSTGRES_STORE: Any | None = None
 _POSTGRES_DISABLED = False
+_REQUEST_USER_EMAIL: ContextVar[str | None] = ContextVar("orange_request_user_email", default=None)
 
 COMPLETION_POLICY = (
     "Call complete_conversation exactly once when the agent is about to give the final answer for a useful "
@@ -154,8 +157,112 @@ def get_llm() -> Any:
     return _LLM_CLIENT
 
 
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _is_env_configured(*names: str) -> bool:
     return any(bool(os.getenv(name)) for name in names)
+
+
+def _token_email_map() -> dict[str, str | None]:
+    tokens: dict[str, str | None] = {}
+    single_token = (os.getenv("ORANGE_MCP_BEARER_TOKEN") or os.getenv("ORANGE_MCP_API_KEY") or "").strip()
+    if single_token:
+        tokens[single_token] = (os.getenv("ORANGE_USER_EMAIL") or "").strip().lower() or None
+
+    raw = (os.getenv("ORANGE_MCP_TOKEN_EMAILS") or "").strip()
+    if not raw:
+        return tokens
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, dict):
+        for token, email in parsed.items():
+            clean_token = str(token or "").strip()
+            if clean_token:
+                tokens[clean_token] = str(email or "").strip().lower() or None
+        return tokens
+
+    for item in raw.split(","):
+        if "=" not in item:
+            continue
+        token, email = item.split("=", 1)
+        clean_token = token.strip()
+        if clean_token:
+            tokens[clean_token] = email.strip().lower() or None
+    return tokens
+
+
+class BearerTokenMiddleware:
+    """Minimal bearer-token auth for remote MCP transport."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        from starlette.responses import JSONResponse
+
+        if _truthy_env("ORANGE_MCP_ALLOW_UNAUTHENTICATED"):
+            await self.app(scope, receive, send)
+            return
+
+        tokens = _token_email_map()
+        if not tokens:
+            response = JSONResponse(
+                {"error": "ORANGE_MCP_BEARER_TOKEN or ORANGE_MCP_TOKEN_EMAILS is required for remote MCP."},
+                status_code=503,
+            )
+            await response(scope, receive, send)
+            return
+
+        headers = {
+            key.decode("latin1").lower(): value.decode("latin1")
+            for key, value in scope.get("headers", [])
+        }
+        auth = headers.get("authorization", "")
+        prefix = "Bearer "
+        token = auth[len(prefix) :].strip() if auth.startswith(prefix) else ""
+        if token not in tokens:
+            response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+            await response(scope, receive, send)
+            return
+
+        context_token = _REQUEST_USER_EMAIL.set(tokens[token])
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _REQUEST_USER_EMAIL.reset(context_token)
+
+
+def _http_middleware() -> list[Any]:
+    from starlette.middleware import Middleware
+
+    return [Middleware(BearerTokenMiddleware)]
+
+
+def create_http_app(path: str = "/"):
+    """Create the ASGI app used when Orange MCP is mounted on FastAPI."""
+
+    return _APP.http_app(path=path, middleware=_http_middleware(), stateless_http=True)
+
+
+def _default_user_email(value: str | None) -> str | None:
+    cleaned = (value or "").strip().lower()
+    if cleaned:
+        return cleaned
+    request_email = (_REQUEST_USER_EMAIL.get() or "").strip().lower()
+    if request_email:
+        return request_email
+    env_email = (os.getenv("ORANGE_USER_EMAIL") or "").strip().lower()
+    return env_email or None
 
 
 def _check_neo4j() -> dict[str, Any]:
@@ -205,6 +312,8 @@ async def orange_status() -> dict:
             "openai_or_nvidia_configured": _is_env_configured("OPENAI_API_KEY", "NVIDIA_API_KEY"),
             "postgres_configured": _is_env_configured("SUPABASE_DB_URL", "POSTGRES_DSN", "DATABASE_URL"),
             "chroma_path": os.getenv("CHROMA_PATH", "./chroma_db"),
+            "default_user_email_configured": bool(_default_user_email(None)),
+            "remote_auth_configured": bool(_token_email_map()) or _truthy_env("ORANGE_MCP_ALLOW_UNAUTHENTICATED"),
         },
         "neo4j": neo4j_status,
         "chroma": chroma_status,
@@ -227,7 +336,7 @@ async def ping_context(
     query: str,
     user_id: str = "",
     source: str = "mcp",
-    scope: str = "both",
+    scope: str = "user",
     user_email: str | None = None,
     org_id: str | None = None,
     company: str | None = None,
@@ -239,13 +348,14 @@ async def ping_context(
     `user_email` for private memory, and `company` or `org_id` for company-scoped shared memory.
     """
 
-    identity = (user_id or user_email or "").strip()
+    resolved_email = _default_user_email(user_email)
+    identity = (user_id or resolved_email or "").strip()
     req = PingContextRequest(
         query=query,
         user_id=identity,
         source=source,
         scope=scope,
-        user_email=user_email,
+        user_email=resolved_email,
         org_id=org_id,
         company=company,
         min_score=min_score,
@@ -268,7 +378,7 @@ async def complete_conversation(
     client_version: str | None = None,
     source_url: str | None = None,
     metadata: dict[str, Any] | None = None,
-    contribute_to_global: bool = True,
+    contribute_to_global: bool = False,
 ) -> dict:
     """Mark a conversation as complete and write durable Orange memory.
 
@@ -277,12 +387,13 @@ async def complete_conversation(
     Orange triage may still skip storage if the conversation contains no durable memory.
     """
 
-    identity = (user_email or user_id or "").strip()
+    resolved_email = _default_user_email(user_email)
+    identity = (resolved_email or user_id or "").strip()
     req = StoreSessionRequest(
         transcript=transcript,
         source=source,
         user_id=identity,
-        user_email=user_email,
+        user_email=resolved_email,
         session_id=session_id,
         org_id=org_id,
         company=company,
@@ -426,4 +537,15 @@ async def chroma_peek(limit: int = 10, scope: str = "user") -> dict:
 
 
 if __name__ == "__main__":
-    _APP.run()
+    transport = (os.getenv("ORANGE_MCP_TRANSPORT") or "stdio").strip().lower()
+    if transport in {"http", "streamable-http", "sse"}:
+        _APP.run(
+            transport=transport,
+            host=os.getenv("ORANGE_MCP_HOST", "0.0.0.0"),
+            port=int(os.getenv("ORANGE_MCP_PORT") or os.getenv("PORT") or "8000"),
+            path=os.getenv("ORANGE_MCP_PATH", "/mcp"),
+            middleware=_http_middleware(),
+            stateless_http=True,
+        )
+    else:
+        _APP.run()

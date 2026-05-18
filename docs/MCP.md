@@ -4,10 +4,10 @@ Orange exposes a local stdio MCP server for coding agents. The intended loop is:
 
 ```text
 agent starts work
-  -> ping_context(query, user_email, company)
+  -> ping_context(query, user_email)
   -> use returned memory while answering
 agent reaches final answer / user says done
-  -> complete_conversation(transcript or messages, user_email, company)
+  -> complete_conversation(transcript or messages, user_email)
   -> Orange triages and writes Insight nodes
 ```
 
@@ -55,7 +55,13 @@ NEO4J_PASSWORD=...
 CHROMA_PATH=./chroma_db
 ```
 
-Company/shared memory only works when the MCP client passes `company` or `org_id`. Company graphs are isolated by normalized `org_id`.
+For now, treat personal email as the identity key. The server can read it from:
+
+1. explicit `user_email` in the tool call
+2. bearer-token mapping in `ORANGE_MCP_TOKEN_EMAILS`
+3. local fallback `ORANGE_USER_EMAIL`
+
+Codex and Claude Code do not currently expose the signed-in account email to arbitrary MCP servers in a reliable server-side field. I verified the local Codex config on this device: `~/.codex/config.toml` contains MCP settings but no account email, and `auth.json` stores auth tokens without a readable email field. That means Orange should not depend on the client login email until we add OAuth.
 
 ## Run Locally
 
@@ -63,9 +69,46 @@ Company/shared memory only works when the MCP client passes `company` or `org_id
 PYTHONPATH=. python -m core.mcp_server.server
 ```
 
-The process speaks MCP over stdio, so it will wait for an MCP client to connect.
+The process speaks MCP over stdio by default, so it will wait for an MCP client to connect.
 
-## Claude Code
+## Remote MCP
+
+The Railway/FastAPI backend also mounts Orange MCP at:
+
+```text
+https://orange-api-production.up.railway.app/mcp/
+```
+
+Remote MCP uses Streamable HTTP and bearer-token auth. Set one of these on Railway:
+
+Single-user/default email:
+
+```bash
+railway variables set ORANGE_MCP_BEARER_TOKEN=replace-with-random-token
+railway variables set ORANGE_USER_EMAIL=harsh@example.com
+```
+
+Multi-user token-to-email mapping:
+
+```bash
+railway variables set 'ORANGE_MCP_TOKEN_EMAILS={"token-for-harsh":"harsh@example.com","token-for-teammate":"teammate@example.com"}'
+```
+
+With `ORANGE_MCP_TOKEN_EMAILS`, users do not need to pass `user_email` manually; the MCP request token maps to their private email identity. Use long random tokens. Anyone with a token can write to that mapped user's memory.
+
+The same app still serves REST endpoints for the Vercel site, so MCP-written Neo4j nodes are visible to the deployed graph as long as Railway and the MCP server use the same Neo4j database.
+
+## Claude Code Remote
+
+```bash
+claude mcp add --transport http --scope user orange \
+  https://orange-api-production.up.railway.app/mcp/ \
+  --header "Authorization: Bearer YOUR_ORANGE_MCP_TOKEN"
+```
+
+Then run `/mcp` inside Claude Code and verify the `orange` server is connected.
+
+## Claude Code Local
 
 Claude Code supports local stdio MCP servers with `claude mcp add`. Replace paths with your machine's repo path:
 
@@ -104,6 +147,26 @@ Keep secrets in `.env` or user-level config, not in a checked-in `.mcp.json`.
 
 Codex reads MCP servers from `~/.codex/config.toml` or a trusted project `.codex/config.toml`.
 
+Remote HTTP config:
+
+```toml
+[mcp_servers.orange]
+url = "https://orange-api-production.up.railway.app/mcp/"
+bearer_token_env_var = "ORANGE_MCP_TOKEN"
+startup_timeout_sec = 20
+tool_timeout_sec = 180
+enabled = true
+```
+
+Then set the token locally before launching Codex:
+
+```bash
+export ORANGE_MCP_TOKEN=YOUR_ORANGE_MCP_TOKEN
+codex
+```
+
+Local stdio config:
+
 ```toml
 [mcp_servers.orange]
 command = "/absolute/path/to/orange/venv311/bin/python"
@@ -127,9 +190,8 @@ At the start of a useful turn:
 {
   "query": "current user request or error",
   "user_email": "harsh@example.com",
-  "company": "Orange",
   "source": "codex",
-  "scope": "both"
+  "scope": "user"
 }
 ```
 
@@ -139,11 +201,12 @@ At completion:
 {
   "source": "codex",
   "user_email": "harsh@example.com",
-  "company": "Orange",
   "transcript": "full conversation transcript",
-  "contribute_to_global": true
+  "contribute_to_global": false
 }
 ```
+
+If remote bearer-token mapping is configured, `user_email` can be omitted.
 
 Use `source: "claude"` for Claude Code, `source: "cursor"` for Cursor, and `source: "codex"` for Codex. If the client is unknown, use `source: "mcp"`.
 
@@ -151,7 +214,7 @@ Use `source: "claude"` for Claude Code, `source: "cursor"` for Cursor, and `sour
 
 1. Call `orange_status`.
 2. Have a conversation with durable memory, for example: `Our company uses .md files as the memory source format. Remember this for future agents.`
-3. At the end, call `complete_conversation` with `user_email` and `company`.
+3. At the end, call `complete_conversation` with `user_email`, or rely on bearer-token mapping.
 4. Inspect:
 
 ```text
@@ -168,5 +231,5 @@ If no nodes appear, check the `skipped_reason`. Generic tasks like `create a web
 - `orange_status.neo4j.ok=false`: check `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD`.
 - `orange_status.chroma.ok=false`: check `CHROMA_PATH` and filesystem permissions.
 - `complete_conversation` returns `skipped_reason`: triage decided the session had no durable user/company memory.
-- Company memory missing: pass `company` or `org_id`; global/company retrieval is intentionally scoped by company.
+- Nodes do not show on Vercel: confirm the MCP server and Railway backend point to the same `NEO4J_URI`, and open the site with the same email.
 - Claude/Codex cannot see tools: verify the configured Python path, `PYTHONPATH`, and run the MCP client's `/mcp` diagnostics.
