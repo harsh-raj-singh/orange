@@ -6,7 +6,7 @@ from typing import Any
 
 
 @dataclass
-class PingContextRequest:
+class RecallMemoryRequest:
     query: str
     user_id: str
     source: str
@@ -28,7 +28,7 @@ class MatchedNode:
 
 
 @dataclass
-class PingContextResponse:
+class RecallMemoryResponse:
     query: str
     matched_nodes: list[MatchedNode]
     node_ids_used: list[str]
@@ -55,6 +55,12 @@ class StoreSessionRequest:
     messages: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     contribute_to_global: bool = True
+    summary: str = ""
+    key_entities: list[str] = field(default_factory=list)
+    decisions: list[str] = field(default_factory=list)
+    problems_solved: list[str] = field(default_factory=list)
+    worth_storing: bool | None = None
+    session_duration_turns: int = 0
 
 
 @dataclass

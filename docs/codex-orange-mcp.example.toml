@@ -1,0 +1,20 @@
+[mcp_servers.orange_remote]
+url = "https://orange-api-production.up.railway.app/mcp/"
+bearer_token_env_var = "ORANGE_MCP_TOKEN"
+startup_timeout_sec = 20
+tool_timeout_sec = 180
+enabled = true
+
+# Generate ORANGE_MCP_TOKEN at:
+# https://site-sage-eta-18.vercel.app/mcp
+
+[mcp_servers.orange]
+command = "/absolute/path/to/orange/venv311/bin/python"
+args = ["-m", "core.mcp_server.server"]
+cwd = "/absolute/path/to/orange"
+startup_timeout_sec = 20
+tool_timeout_sec = 180
+enabled = true
+
+[mcp_servers.orange.env]
+PYTHONPATH = "/absolute/path/to/orange"

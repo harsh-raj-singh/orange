@@ -56,6 +56,50 @@ def _user_message_transcript(normalized: NormalizedSession) -> str:
     return normalized.transcript
 
 
+def _structured_context_from_metadata(metadata: dict[str, Any]) -> str:
+    raw_context = metadata.get("structured_completion_context")
+    if isinstance(raw_context, str) and raw_context.strip():
+        return raw_context.strip()
+
+    sections: list[str] = []
+    summary = str(metadata.get("summary") or "").strip()
+    if summary:
+        sections.append(f"Summary: {summary}")
+    for key, label in (
+        ("key_entities", "Key entities"),
+        ("decisions", "Decisions"),
+        ("problems_solved", "Problems solved"),
+    ):
+        values = metadata.get(key)
+        if isinstance(values, list):
+            cleaned = [str(value).strip() for value in values if str(value).strip()]
+            if cleaned:
+                sections.append(f"{label}:\n" + "\n".join(f"- {item}" for item in cleaned))
+    turns = metadata.get("session_duration_turns")
+    if turns:
+        try:
+            sections.append(f"Approximate session duration turns: {int(turns)}")
+        except (TypeError, ValueError):
+            pass
+
+    if not sections:
+        return ""
+    return "Caller-provided structured session summary:\n" + "\n\n".join(sections)
+
+
+def _augment_transcript_with_structured_context(transcript: str, metadata: dict[str, Any]) -> str:
+    structured_context = _structured_context_from_metadata(metadata)
+    cleaned_transcript = (transcript or "").strip()
+    if structured_context and cleaned_transcript:
+        return f"{structured_context}\n\nTranscript:\n{cleaned_transcript}"
+    return structured_context or cleaned_transcript
+
+
+def _session_summary_text(scoped_session: NormalizedSession, fallback: str) -> str:
+    summary = str(scoped_session.metadata.get("summary") or "").strip()
+    return summary or fallback
+
+
 def _session_node_from_normalized(scoped_session: NormalizedSession, summary: str) -> Session:
     started_at = scoped_session.started_at or scoped_session.ingested_at or datetime.now(timezone.utc)
     return Session(
@@ -143,7 +187,7 @@ async def _run_for_scope(
         logger.info("store_session_insights_empty", extra={"session_id": scoped_session_id, "scope": scope})
         return {"insights_stored": 0, "edges_written": 0, "skipped_reason": reason}, scoped_errors
 
-    session = _session_node_from_normalized(scoped_session, scoped_transcript)
+    session = _session_node_from_normalized(scoped_session, _session_summary_text(scoped_session, scoped_transcript))
     insights = [
         Insight(
             scope="global" if scope == "global" else "user",
@@ -202,6 +246,7 @@ async def run_extraction_pipeline(
     contribute_to_global: bool = True,
     pii_llm: Any | None = None,
     known_pii: list[str] | None = None,
+    force_worth_storing: bool = False,
 ) -> dict:
     """
     Main pipeline. Call this when a chat is marked complete.
@@ -227,16 +272,18 @@ async def run_extraction_pipeline(
         )
     )
     transcript = normalized.transcript
+    augmented_transcript = _augment_transcript_with_structured_context(transcript, normalized.metadata)
     org_id, company = _company_from_normalized(normalized)
 
     user_summary, user_errors = await _run_for_scope(
         scoped_session=normalized,
-        scoped_transcript=transcript,
+        scoped_transcript=augmented_transcript,
         scoped_user_id=user_id,
         scope="user",
         neo4j_client=neo4j_client,
         chroma_client=chroma_client,
         user_email=normalized.user_email,
+        run_triage=not force_worth_storing,
         org_id=org_id,
         company=company,
     )
@@ -249,7 +296,10 @@ async def run_extraction_pipeline(
         pii_values = [value for value in [normalized.user_id, normalized.user_email, *normalized.participant_ids] if value]
         if known_pii:
             pii_values.extend(known_pii)
-        global_source_transcript = _user_message_transcript(normalized)
+        global_source_transcript = _augment_transcript_with_structured_context(
+            _user_message_transcript(normalized),
+            normalized.metadata,
+        )
         scrubbed_transcript = await scrub_pii_transcript(global_source_transcript, llm=pii_llm, known_pii=pii_values)
         global_summary, global_errors = await _run_for_scope(
             scoped_session=_global_session_from(normalized, scrubbed_transcript),
@@ -259,7 +309,7 @@ async def run_extraction_pipeline(
             neo4j_client=neo4j_client,
             chroma_client=chroma_client,
             contributed_by=normalized.user_email or normalized.user_id,
-            run_triage=True,
+            run_triage=not force_worth_storing,
             org_id=org_id,
             company=company,
         )

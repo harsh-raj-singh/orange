@@ -12,6 +12,7 @@ streamlit==1.40.1
 # Viz API
 fastapi==0.110.1
 uvicorn[standard]==0.40.0
+fastmcp==2.14.3
 
 # Explicit pins for local embeddings + vector + graph support
 sentence-transformers==5.0.0
@@ -22,6 +23,7 @@ neo4j==5.25.0
 openai==2.15.0
 dspy-ai==3.2.1
 numpy==1.26.4
+google-auth==2.43.0
 
 # Development
 pytest==8.3.4  # Testing

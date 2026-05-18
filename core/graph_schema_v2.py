@@ -34,6 +34,7 @@ class NodeType(str, Enum):
 
 class SourceType(str, Enum):
     MCP = "mcp"
+    CODEX = "codex"
     CURSOR = "cursor"
     CLAUDE = "claude"
     SLACK = "slack"

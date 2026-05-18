@@ -16,7 +16,7 @@ SessionIngestionRequest
 -> extract durable Insights
 -> write Session + Insight graph nodes to Neo4j
 -> write searchable vectors to Chroma
--> retrieve prior context with ping_context
+-> retrieve prior context with recall_memory
 ```
 
 The most important product loop is:
@@ -96,9 +96,9 @@ Company/shared vectors are scoped by company/org metadata so one company's graph
 
 ### Retrieval + Inspection
 
-- `core/mcp_server/server.py` exposes MCP tools such as `ping_context`, `store_session`, `inspect_graph`, `get_node`, and `chroma_peek`.
+- `core/mcp_server/server.py` exposes MCP tools such as `recall_memory`, `checkpoint_context`, `store_session`, `inspect_graph`, `get_node`, and `chroma_peek`.
 - `core/mcp_server/handlers.py` contains the MCP tool handlers and retrieval logic.
-- `core/viz_api/routes/demo.py` exposes demo-facing `POST /demo/complete` and `POST /demo/ping_context`.
+- `core/viz_api/routes/demo.py` exposes demo-facing `POST /demo/complete` and `POST /demo/recall_memory`.
 - `core/viz_api/routes/graph.py` serves graph read endpoints used by the demo.
 - `core/viz_api/routes/chroma.py` serves vector-store inspection endpoints.
 - `core/viz_api/routes/health.py` provides lightweight and deep health checks.
@@ -168,6 +168,7 @@ Important variables:
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `NEO4J_URI`
+- optional `FRONTEND_NEO4J_URI` for `orange_status` frontend/backend Neo4j alignment checks
 - `NEO4J_USER`
 - `NEO4J_PASSWORD`
 - `CHROMA_PATH`
@@ -200,7 +201,7 @@ Useful endpoints:
 - `GET /chroma/status`
 - `GET /chroma/peek?limit=5`
 - `POST /demo/complete`
-- `POST /demo/ping_context`
+- `POST /demo/recall_memory`
 
 ### Start the Next.js demo
 
@@ -223,12 +224,16 @@ PYTHONPATH=. python -m core.mcp_server.server
 ```
 
 This runs Orange in stdio mode for MCP-compatible clients.
+See [`docs/MCP.md`](docs/MCP.md) for Claude Code and Codex setup snippets.
 
 ## MCP Tools
 
 The MCP server currently exposes:
 
-- `ping_context`
+- `orange_status`
+- `recall_memory`
+- `checkpoint_context`
+- `complete_conversation`
 - `store_session`
 - `resolve_problem`
 - `inspect_graph`
@@ -237,7 +242,16 @@ The MCP server currently exposes:
 - `list_sessions`
 - `chroma_peek`
 
-`resolve_problem` remains for compatibility; the current memory write path is session-level Insight extraction.
+For coding agents, the happy path is `recall_memory` before answering, `checkpoint_context` when important mid-session context should be preserved, and `complete_conversation` once when the session is done. `resolve_problem` remains for compatibility; the current memory write path is session-level Insight extraction.
+
+Desktop setup page:
+
+```text
+https://site-sage-eta-18.vercel.app/mcp
+```
+
+This page mints a personal signed MCP token and shows copyable Codex/Claude Code setup snippets.
+Users sign in with Google first; Orange verifies the Google ID token and scopes the MCP token to that email.
 
 ## Deployed Demo
 

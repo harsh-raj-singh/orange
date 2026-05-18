@@ -57,7 +57,7 @@ def get_neo4j() -> Any:
     if not url:
         raise ValueError("Missing MEMGRAPH_URL/NEO4J_URL (or MEMGRAPH_HOST) for MCP server.")
 
-    username = os.getenv("MEMGRAPH_USERNAME") or os.getenv("NEO4J_USERNAME")
+    username = os.getenv("MEMGRAPH_USERNAME") or os.getenv("NEO4J_USERNAME") or os.getenv("NEO4J_USER")
     password = os.getenv("MEMGRAPH_PASSWORD") or os.getenv("NEO4J_PASSWORD")
 
     if username and password:

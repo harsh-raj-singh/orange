@@ -1,11 +1,11 @@
 from core.mcp_server.handlers import (
-    handle_ping_context,
+    handle_recall_memory,
     handle_resolve_problem,
     handle_store_session,
 )
 from core.mcp_server.models import (
-    PingContextRequest,
-    PingContextResponse,
+    RecallMemoryRequest,
+    RecallMemoryResponse,
     ResolveProblemRequest,
     ResolveProblemResponse,
     StoreSessionRequest,
@@ -13,13 +13,13 @@ from core.mcp_server.models import (
 )
 
 __all__ = [
-    "PingContextRequest",
-    "PingContextResponse",
+    "RecallMemoryRequest",
+    "RecallMemoryResponse",
     "ResolveProblemRequest",
     "ResolveProblemResponse",
     "StoreSessionRequest",
     "StoreSessionResponse",
-    "handle_ping_context",
+    "handle_recall_memory",
     "handle_resolve_problem",
     "handle_store_session",
 ]

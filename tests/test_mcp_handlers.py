@@ -6,12 +6,12 @@ import pytest
 
 from core.mcp_server.handlers import (
     _STORE_SESSION_CACHE,
-    handle_ping_context,
+    handle_recall_memory,
     handle_resolve_problem,
     handle_store_session,
 )
 from core.mcp_server.models import (
-    PingContextRequest,
+    RecallMemoryRequest,
     ResolveProblemRequest,
     StoreSessionRequest,
 )
@@ -22,7 +22,7 @@ def clear_store_session_cache() -> None:
     _STORE_SESSION_CACHE.clear()
 
 
-def test_ping_context_returns_context_blocks(mock_neo4j, mock_chroma) -> None:
+def test_recall_memory_returns_context_blocks(mock_neo4j, mock_chroma) -> None:
     mock_neo4j.problems[("p1", "u1")] = {
         "node_id": "p1",
         "canonical_label": "fastapi cors middleware order",
@@ -52,8 +52,8 @@ def test_ping_context_returns_context_blocks(mock_neo4j, mock_chroma) -> None:
         ]],
     }
 
-    req = PingContextRequest(query="cors problem", user_id="u1", source="cursor")
-    resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+    req = RecallMemoryRequest(query="cors problem", user_id="u1", source="cursor")
+    resp = asyncio.run(handle_recall_memory(req, neo4j=mock_neo4j, chroma=mock_chroma))
 
     assert len(resp.matched_nodes) > 0
     assert any(n.node_type == "Problem" for n in resp.matched_nodes)
@@ -61,7 +61,7 @@ def test_ping_context_returns_context_blocks(mock_neo4j, mock_chroma) -> None:
     assert len(resp.node_ids_used) > 0
 
 
-def test_ping_context_respects_token_budget(mock_neo4j, mock_chroma) -> None:
+def test_recall_memory_respects_token_budget(mock_neo4j, mock_chroma) -> None:
     ids: list[str] = []
     metadatas: list[dict] = []
     for idx in range(10):
@@ -81,8 +81,8 @@ def test_ping_context_respects_token_budget(mock_neo4j, mock_chroma) -> None:
         "metadatas": [metadatas],
     }
 
-    req = PingContextRequest(query="anything", user_id="u1", source="cursor")
-    resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+    req = RecallMemoryRequest(query="anything", user_id="u1", source="cursor")
+    resp = asyncio.run(handle_recall_memory(req, neo4j=mock_neo4j, chroma=mock_chroma))
 
     assert len(resp.matched_nodes) > 0
     assert any(n.node_type == "Problem" for n in resp.matched_nodes)
@@ -90,7 +90,7 @@ def test_ping_context_respects_token_budget(mock_neo4j, mock_chroma) -> None:
     assert len(resp.node_ids_used) > 0
 
 
-def test_ping_context_hydrates_with_neo4j_node_id_metadata(mock_neo4j, mock_chroma) -> None:
+def test_recall_memory_hydrates_with_neo4j_node_id_metadata(mock_neo4j, mock_chroma) -> None:
     mock_neo4j.problems[("p-real", "u1")] = {
         "node_id": "p-real",
         "canonical_label": "real graph node",
@@ -110,14 +110,14 @@ def test_ping_context_hydrates_with_neo4j_node_id_metadata(mock_neo4j, mock_chro
         ]],
     }
 
-    req = PingContextRequest(query="graph id", user_id="u1", source="cursor")
-    resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+    req = RecallMemoryRequest(query="graph id", user_id="u1", source="cursor")
+    resp = asyncio.run(handle_recall_memory(req, neo4j=mock_neo4j, chroma=mock_chroma))
 
     assert resp.node_ids_used == ["p-real"]
     assert resp.matched_nodes[0].node_data["canonical_label"] == "real graph node"
 
 
-def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_neo4j, mock_chroma) -> None:
+def test_recall_memory_queries_user_and_global_scopes_with_user_preference(mock_neo4j, mock_chroma) -> None:
     mock_neo4j.problems[("p-user", "u1")] = {
         "node_id": "p-user",
         "canonical_label": "shared cors problem",
@@ -160,7 +160,7 @@ def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_n
         },
     ]
 
-    req = PingContextRequest(
+    req = RecallMemoryRequest(
         query="cors problem",
         user_id="u1",
         user_email="dev@example.com",
@@ -168,7 +168,7 @@ def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_n
         source="cursor",
         scope="both",
     )
-    resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+    resp = asyncio.run(handle_recall_memory(req, neo4j=mock_neo4j, chroma=mock_chroma))
 
     assert len(resp.matched_nodes) == 1
     assert resp.matched_nodes[0].source == "user"
@@ -179,7 +179,7 @@ def test_ping_context_queries_user_and_global_scopes_with_user_preference(mock_n
     assert mock_chroma.query_calls[1]["where"] == {"scope": "global", "org_id": "acme"}
 
 
-def test_ping_context_global_scope_hides_contributor_and_uses_requested_threshold(mock_neo4j, mock_chroma) -> None:
+def test_recall_memory_global_scope_hides_contributor_and_uses_requested_threshold(mock_neo4j, mock_chroma) -> None:
     mock_neo4j.problems[("p-global", "")] = {
         "node_id": "p-global",
         "canonical_label": "global redis problem",
@@ -201,8 +201,8 @@ def test_ping_context_global_scope_hides_contributor_and_uses_requested_threshol
         ]],
     }
 
-    req = PingContextRequest(query="redis", user_id="u1", source="cursor", min_score=0.70, scope="global", org_id="acme")
-    resp = asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+    req = RecallMemoryRequest(query="redis", user_id="u1", source="cursor", min_score=0.70, scope="global", org_id="acme")
+    resp = asyncio.run(handle_recall_memory(req, neo4j=mock_neo4j, chroma=mock_chroma))
 
     assert len(resp.matched_nodes) == 1
     assert resp.matched_nodes[0].source == "global"
@@ -210,10 +210,10 @@ def test_ping_context_global_scope_hides_contributor_and_uses_requested_threshol
     assert mock_chroma.query_calls[0]["where"] == {"scope": "global", "org_id": "acme"}
 
 
-def test_ping_context_invalid_source_raises(mock_neo4j, mock_chroma) -> None:
-    req = PingContextRequest(query="x", user_id="u1", source="nonexistent_tool")
+def test_recall_memory_invalid_source_raises(mock_neo4j, mock_chroma) -> None:
+    req = RecallMemoryRequest(query="x", user_id="u1", source="nonexistent_tool")
     with pytest.raises(ValueError, match="source"):
-        asyncio.run(handle_ping_context(req, neo4j=mock_neo4j, chroma=mock_chroma))
+        asyncio.run(handle_recall_memory(req, neo4j=mock_neo4j, chroma=mock_chroma))
 
 
 def test_store_session_returns_summary(monkeypatch: pytest.MonkeyPatch, mock_neo4j, mock_chroma) -> None:
@@ -238,6 +238,73 @@ def test_store_session_returns_summary(monkeypatch: pytest.MonkeyPatch, mock_neo
     assert resp.problems_merged == 0
     assert resp.solutions_written == 1
     assert calls[0]["source"].value == "cursor"
+
+
+def test_store_session_accepts_codex_source_and_email_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_neo4j,
+    mock_chroma,
+) -> None:
+    calls: list[dict] = []
+
+    async def fake_run_extraction_pipeline(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {"insights_stored": 1, "skipped_reason": None}
+
+    monkeypatch.setattr("core.mcp_server.handlers.run_extraction_pipeline", fake_run_extraction_pipeline)
+
+    req = StoreSessionRequest(
+        source="codex",
+        user_email="dev@example.com",
+        company="Acme",
+        session_id="codex-session",
+        messages=[
+            {"role": "user", "content": "Our company uses .md files for memory."},
+            {"role": "assistant", "content": "Got it."},
+        ],
+    )
+    resp = asyncio.run(handle_store_session(req, neo4j=mock_neo4j, chroma=mock_chroma, llm=None))
+
+    assert resp.session_id == "codex-session"
+    assert resp.insights_stored == 1
+    assert calls[0]["source"].value == "codex"
+    assert calls[0]["user_id"] == "dev@example.com"
+    assert calls[0]["normalized_session"].org_id == "acme"
+
+
+def test_store_session_passes_structured_completion_context(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_neo4j,
+    mock_chroma,
+) -> None:
+    calls: list[dict] = []
+
+    async def fake_run_extraction_pipeline(**kwargs) -> dict:
+        calls.append(kwargs)
+        return {"insights_stored": 1, "skipped_reason": None}
+
+    monkeypatch.setattr("core.mcp_server.handlers.run_extraction_pipeline", fake_run_extraction_pipeline)
+
+    req = StoreSessionRequest(
+        source="codex",
+        user_email="dev@example.com",
+        session_id="structured-session",
+        messages=[{"role": "user", "content": "We fixed the auth callback."}],
+        summary="Fixed the OAuth callback mismatch.",
+        key_entities=["auth/callback.ts", "OAuth adapter"],
+        decisions=["Keep the callback route under /api/auth."],
+        problems_solved=["Redirect URI mismatch."],
+        worth_storing=True,
+        session_duration_turns=6,
+    )
+    resp = asyncio.run(handle_store_session(req, neo4j=mock_neo4j, chroma=mock_chroma, llm=None))
+
+    assert resp.insights_stored == 1
+    assert calls[0]["force_worth_storing"] is True
+    metadata = calls[0]["normalized_session"].metadata
+    assert metadata["summary"] == "Fixed the OAuth callback mismatch."
+    assert metadata["key_entities"] == ["auth/callback.ts", "OAuth adapter"]
+    assert "Caller-provided structured session summary" in metadata["structured_completion_context"]
 
 
 def test_store_session_records_normalized_session_in_postgres(

@@ -52,6 +52,19 @@ SOURCE_REGISTRY: dict[SourceType, SourceConfig] = {
         retrieval_context_token_budget=1800,
         extraction_agents=("DebugExtractionAgent", "ConceptExtractionAgent"),
     ),
+    SourceType.CODEX: SourceConfig(
+        source_id=SourceType.CODEX,
+        expected_conversation_types=(
+            ConversationType.DEBUGGING,
+            ConversationType.BRAINSTORM,
+            ConversationType.QA,
+            ConversationType.DECISION,
+        ),
+        realtime_ping_enabled=True,
+        has_resolve_callback=True,
+        retrieval_context_token_budget=1800,
+        extraction_agents=("InsightExtractor",),
+    ),
     SourceType.CURSOR: SourceConfig(
         source_id=SourceType.CURSOR,
         expected_conversation_types=(

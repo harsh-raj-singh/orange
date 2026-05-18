@@ -18,7 +18,7 @@ const schemaCode = `SessionIngestionRequest {
   ]
 }
 
-ping_context("same OPTIONS failure")
+recall_memory("same OPTIONS failure")
   -> vector match: problem_cors_order
   -> graph hydrate: failed path + worked fix + server.py`;
 
@@ -160,6 +160,9 @@ export default function Home() {
             <a className="transition hover:text-[#ff9f5f]" href="#mcp">
               MCP
             </a>
+            <a className="transition hover:text-[#ff9f5f]" href="/mcp">
+              Connect
+            </a>
           </div>
           <a className="shimmer-button inline-flex h-10 items-center justify-center rounded-md bg-[#f26d21] px-4 text-sm font-bold text-white shadow-[0_14px_36px_rgba(242,109,33,0.28)] transition hover:scale-[1.02]" href="#try">
             Try demo
@@ -216,7 +219,7 @@ export default function Home() {
             <div data-ping-card className="absolute inset-x-4 top-6 rounded-xl border border-white/12 bg-[#080d0a]/92 p-5 text-white shadow-2xl backdrop-blur sm:inset-x-8">
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div>
-                  <p className="font-mono text-xs uppercase text-[#ffb36b]">ping_context</p>
+                  <p className="font-mono text-xs uppercase text-[#ffb36b]">recall_memory</p>
                   <p className="mt-1 text-sm text-[#d7e1d8]">similar issue detected</p>
                 </div>
                 <span className="rounded-md bg-[#ffb36b] px-2.5 py-1 font-mono text-xs font-semibold text-[#1b201c]" data-score-target="0.91">
@@ -286,7 +289,7 @@ export default function Home() {
               The memory loop becomes visible as you scroll.
             </RevealHeading>
             <div className="mt-8 grid gap-3">
-              {["SessionIngestionRequest", "Triage + Insight agents", "ping_context response"].map((label, index) => (
+              {["SessionIngestionRequest", "Triage + Insight agents", "recall_memory response"].map((label, index) => (
                 <div className="pipeline-step rounded-lg border border-[#24352d]/12 bg-white p-4 shadow-sm" key={label}>
                   <p className="font-mono text-xs text-[#c5551c]">0{index + 1}</p>
                   <p className="mt-2 text-lg font-semibold text-[#24352d]">{label}</p>
@@ -471,6 +474,13 @@ export default function Home() {
               </article>
             ))}
           </div>
+          <a
+            data-reveal
+            href="/mcp"
+            className="mt-8 inline-flex h-11 items-center justify-center rounded-md bg-[#f97316] px-5 text-sm font-bold text-white shadow-[0_14px_36px_rgba(249,115,22,0.24)] transition hover:scale-[1.02]"
+          >
+            Connect MCP
+          </a>
         </div>
       </section>
     </main>
