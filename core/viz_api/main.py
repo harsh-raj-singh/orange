@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.mcp_server.server import create_http_app as create_mcp_http_app
-from core.viz_api.routes import chroma, demo, graph, health
+from core.viz_api.routes import chroma, demo, graph, health, mcp_connect
 
 mcp_app = create_mcp_http_app(path="/")
 app = FastAPI(title="Orange1 Graph Viz API", version="1.0.0", lifespan=mcp_app.lifespan)
@@ -35,4 +35,5 @@ app.include_router(health.router)
 app.include_router(graph.router, prefix="/graph")
 app.include_router(chroma.router, prefix="/chroma")
 app.include_router(demo.router, prefix="/demo")
+app.include_router(mcp_connect.router, prefix="/mcp")
 app.mount("/mcp", mcp_app)

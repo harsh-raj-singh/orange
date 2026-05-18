@@ -30,6 +30,7 @@ from core.mcp_server.models import (
     ResolveProblemRequest,
     StoreSessionRequest,
 )
+from core.mcp_server.tokens import verify_mcp_token
 
 try:
     from fastmcp import FastMCP
@@ -197,6 +198,10 @@ def _token_email_map() -> dict[str, str | None]:
     return tokens
 
 
+def _signed_tokens_configured() -> bool:
+    return bool((os.getenv("ORANGE_MCP_SIGNING_SECRET") or "").strip())
+
+
 class BearerTokenMiddleware:
     """Minimal bearer-token auth for remote MCP transport."""
 
@@ -215,9 +220,14 @@ class BearerTokenMiddleware:
             return
 
         tokens = _token_email_map()
-        if not tokens:
+        if not tokens and not _signed_tokens_configured():
             response = JSONResponse(
-                {"error": "ORANGE_MCP_BEARER_TOKEN or ORANGE_MCP_TOKEN_EMAILS is required for remote MCP."},
+                {
+                    "error": (
+                        "ORANGE_MCP_SIGNING_SECRET, ORANGE_MCP_BEARER_TOKEN, "
+                        "or ORANGE_MCP_TOKEN_EMAILS is required for remote MCP."
+                    )
+                },
                 status_code=503,
             )
             await response(scope, receive, send)
@@ -230,12 +240,15 @@ class BearerTokenMiddleware:
         auth = headers.get("authorization", "")
         prefix = "Bearer "
         token = auth[len(prefix) :].strip() if auth.startswith(prefix) else ""
+        token_email = tokens.get(token)
         if token not in tokens:
+            token_email = verify_mcp_token(token)
+        if token_email is None and token not in tokens:
             response = JSONResponse({"error": "Unauthorized"}, status_code=401)
             await response(scope, receive, send)
             return
 
-        context_token = _REQUEST_USER_EMAIL.set(tokens[token])
+        context_token = _REQUEST_USER_EMAIL.set(token_email)
         try:
             await self.app(scope, receive, send)
         finally:
@@ -313,7 +326,11 @@ async def orange_status() -> dict:
             "postgres_configured": _is_env_configured("SUPABASE_DB_URL", "POSTGRES_DSN", "DATABASE_URL"),
             "chroma_path": os.getenv("CHROMA_PATH", "./chroma_db"),
             "default_user_email_configured": bool(_default_user_email(None)),
-            "remote_auth_configured": bool(_token_email_map()) or _truthy_env("ORANGE_MCP_ALLOW_UNAUTHENTICATED"),
+            "remote_auth_configured": (
+                bool(_token_email_map())
+                or _signed_tokens_configured()
+                or _truthy_env("ORANGE_MCP_ALLOW_UNAUTHENTICATED")
+            ),
         },
         "neo4j": neo4j_status,
         "chroma": chroma_status,

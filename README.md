@@ -242,6 +242,14 @@ The MCP server currently exposes:
 
 For coding agents, the happy path is `ping_context` before answering and `complete_conversation` once when the session is done. `resolve_problem` remains for compatibility; the current memory write path is session-level Insight extraction.
 
+Desktop setup page:
+
+```text
+https://site-sage-eta-18.vercel.app/mcp
+```
+
+This page mints a personal signed MCP token and shows copyable Codex/Claude Code setup snippets.
+
 ## Deployed Demo
 
 Frontend:

@@ -58,8 +58,9 @@ CHROMA_PATH=./chroma_db
 For now, treat personal email as the identity key. The server can read it from:
 
 1. explicit `user_email` in the tool call
-2. bearer-token mapping in `ORANGE_MCP_TOKEN_EMAILS`
-3. local fallback `ORANGE_USER_EMAIL`
+2. a signed self-serve MCP token minted by `/mcp/connect`
+3. bearer-token mapping in `ORANGE_MCP_TOKEN_EMAILS`
+4. local fallback `ORANGE_USER_EMAIL`
 
 Codex and Claude Code do not currently expose the signed-in account email to arbitrary MCP servers in a reliable server-side field. I verified the local Codex config on this device: `~/.codex/config.toml` contains MCP settings but no account email, and `auth.json` stores auth tokens without a readable email field. That means Orange should not depend on the client login email until we add OAuth.
 
@@ -81,7 +82,22 @@ https://orange-api-production.up.railway.app/mcp/
 
 Remote MCP uses Streamable HTTP and bearer-token auth. Set one of these on Railway:
 
-Single-user/default email:
+Self-serve website tokens:
+
+```bash
+railway variables set ORANGE_MCP_SIGNING_SECRET=$(openssl rand -hex 32)
+railway variables set ORANGE_PUBLIC_BACKEND_URL=https://orange-api-production.up.railway.app
+```
+
+Then users can open:
+
+```text
+https://site-sage-eta-18.vercel.app/mcp
+```
+
+They enter email, receive a signed bearer token, and copy the Codex config.
+
+Single-user/default token:
 
 ```bash
 railway variables set ORANGE_MCP_BEARER_TOKEN=replace-with-random-token
@@ -97,6 +113,8 @@ railway variables set 'ORANGE_MCP_TOKEN_EMAILS={"token-for-harsh":"harsh@example
 With `ORANGE_MCP_TOKEN_EMAILS`, users do not need to pass `user_email` manually; the MCP request token maps to their private email identity. Use long random tokens. Anyone with a token can write to that mapped user's memory.
 
 The same app still serves REST endpoints for the Vercel site, so MCP-written Neo4j nodes are visible to the deployed graph as long as Railway and the MCP server use the same Neo4j database.
+
+Current security note: `/mcp/connect` trusts the email the user enters. This is intentionally simple for the desktop beta. Before broader usage, replace this with email OTP or OAuth so users prove ownership of the email before a token is minted.
 
 ## Claude Code Remote
 

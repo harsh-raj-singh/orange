@@ -160,6 +160,9 @@ export default function Home() {
             <a className="transition hover:text-[#ff9f5f]" href="#mcp">
               MCP
             </a>
+            <a className="transition hover:text-[#ff9f5f]" href="/mcp">
+              Connect
+            </a>
           </div>
           <a className="shimmer-button inline-flex h-10 items-center justify-center rounded-md bg-[#f26d21] px-4 text-sm font-bold text-white shadow-[0_14px_36px_rgba(242,109,33,0.28)] transition hover:scale-[1.02]" href="#try">
             Try demo
@@ -471,6 +474,13 @@ export default function Home() {
               </article>
             ))}
           </div>
+          <a
+            data-reveal
+            href="/mcp"
+            className="mt-8 inline-flex h-11 items-center justify-center rounded-md bg-[#f97316] px-5 text-sm font-bold text-white shadow-[0_14px_36px_rgba(249,115,22,0.24)] transition hover:scale-[1.02]"
+          >
+            Connect MCP
+          </a>
         </div>
       </section>
     </main>
