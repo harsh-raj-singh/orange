@@ -7,6 +7,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import os
 import json
+import uuid
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -21,16 +22,14 @@ from core.graph_queries.neo4j_queries import (
 from core.graph_upsert.dedup import (
     ORANGE_GLOBAL_VECTOR_COLLECTION,
     ORANGE_USER_VECTOR_COLLECTION,
-    get_or_create_global_collection,
-    get_or_create_user_collection,
 )
-from core.mcp_server.handlers import handle_ping_context, handle_resolve_problem, handle_store_session
+from core.mcp_server.handlers import handle_recall_memory, handle_resolve_problem, handle_store_session
 from core.mcp_server.models import (
-    PingContextRequest,
+    RecallMemoryRequest,
     ResolveProblemRequest,
     StoreSessionRequest,
 )
-from core.mcp_server.tokens import verify_mcp_token
+from core.mcp_server.tokens import decode_mcp_token, verify_mcp_token
 
 try:
     from fastmcp import FastMCP
@@ -45,13 +44,67 @@ _LLM_CLIENT: Any | None = None
 _POSTGRES_STORE: Any | None = None
 _POSTGRES_DISABLED = False
 _REQUEST_USER_EMAIL: ContextVar[str | None] = ContextVar("orange_request_user_email", default=None)
+_REQUEST_BEARER_TOKEN: ContextVar[str | None] = ContextVar("orange_request_bearer_token", default=None)
 
-COMPLETION_POLICY = (
-    "Call complete_conversation exactly once when the agent is about to give the final answer for a useful "
-    "work session, or when the user says done, remember this, store this, mark complete, or wrap this. "
-    "Do not call it mid-session. For trivial greetings or generic one-off answers, skip it unless the user "
-    "gave durable facts, preferences, company workflow details, or steering that future agents should remember."
+ORANGE_INSTRUCTIONS = """## Orange Memory Protocol
+
+### START of every session
+Call recall_memory with a short query describing the current task before 
+doing any work. This hydrates context from prior sessions.
+
+### DURING a session
+Call checkpoint_context whenever:
+- A non-obvious solution is found
+- An important architectural decision is made
+- A root cause is identified
+Do NOT call complete_conversation mid-session.
+
+### END of session (final answer given, or user says done/remember/store/wrap)
+Call complete_conversation with transcript or messages.
+- Provide summary, key_entities, decisions, problems_solved if possible.
+- Set worth_storing=false for trivial sessions (greetings, generic Q&A, 
+  one-off lookups with no durable content).
+- Leave worth_storing unset to let Orange triage decide automatically.
+- This must be the LAST tool call before ending the response.
+
+### Identity
+Always pass user_email when available. For org/company memory, pass company 
+or org_id. If using a remote MCP token, user_email is inferred automatically."""
+
+COMPLETION_POLICY = ORANGE_INSTRUCTIONS
+
+RECALL_MEMORY_DESCRIPTION = (
+    "Call this BEFORE starting any coding or problem-solving work. Pass the current user request as `query`. "
+    "Retrieves relevant memory from prior sessions via Chroma vector search + Neo4j graph hydration. "
+    "Returns matched_nodes and neighborhood. Use user_email for personal memory, company or org_id for shared org memory."
 )
+
+COMPLETE_CONVERSATION_DESCRIPTION = (
+    "Call this ONCE at the end of a useful work session, or when the user says done/remember/store/wrap. "
+    "Provide the full transcript or messages list. Optionally add a summary, key_entities, decisions, and "
+    "problems_solved for higher-quality storage. Set worth_storing=false for trivial or unproductive sessions "
+    "to skip triage entirely. Set worth_storing=true only if you are certain the session has durable memory value. "
+    "Leave worth_storing unset to let Orange triage decide. Do NOT call this mid-session."
+)
+
+CHECKPOINT_CONTEXT_DESCRIPTION = (
+    "Call this mid-session to save an important decision, finding, or non-obvious solution before it can be lost. "
+    "Lightweight write to Neo4j only — no triage, no embedding. Use when something important just happened that you "
+    "don't want to lose if the session ends unexpectedly. Safe to call multiple times per session."
+)
+
+TOOL_LIST = [
+    "orange_status",
+    "recall_memory",
+    "checkpoint_context",
+    "complete_conversation",
+    "store_session",
+    "inspect_graph",
+    "get_node",
+    "get_session_graph",
+    "list_sessions",
+    "chroma_peek",
+]
 
 
 class OpenAILLMAdapter:
@@ -162,10 +215,6 @@ def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _is_env_configured(*names: str) -> bool:
-    return any(bool(os.getenv(name)) for name in names)
-
-
 def _token_email_map() -> dict[str, str | None]:
     tokens: dict[str, str | None] = {}
     single_token = (os.getenv("ORANGE_MCP_BEARER_TOKEN") or os.getenv("ORANGE_MCP_API_KEY") or "").strip()
@@ -249,10 +298,12 @@ class BearerTokenMiddleware:
             return
 
         context_token = _REQUEST_USER_EMAIL.set(token_email)
+        bearer_context_token = _REQUEST_BEARER_TOKEN.set(token or None)
         try:
             await self.app(scope, receive, send)
         finally:
             _REQUEST_USER_EMAIL.reset(context_token)
+            _REQUEST_BEARER_TOKEN.reset(bearer_context_token)
 
 
 def _http_middleware() -> list[Any]:
@@ -278,78 +329,204 @@ def _default_user_email(value: str | None) -> str | None:
     return env_email or None
 
 
+def _run_neo4j(query: str, **params: Any) -> Any:
+    neo4j = get_neo4j()
+    if hasattr(neo4j, "run"):
+        return neo4j.run(query, **params)
+    if hasattr(neo4j, "session"):
+        with neo4j.session() as session:
+            result = session.run(query, **params)
+            if hasattr(result, "data"):
+                rows = result.data()
+                return rows[0] if rows else None
+            return result
+    raise ValueError("Neo4j client must expose run(...) or session().")
+
+
+def _single_record(result: Any) -> dict[str, Any] | None:
+    if result is None:
+        return None
+    if isinstance(result, list):
+        return result[0] if result else None
+    if hasattr(result, "single"):
+        record = result.single()
+        return dict(record) if record else None
+    if hasattr(result, "data"):
+        rows = result.data()
+        return rows[0] if rows else None
+    if isinstance(result, dict):
+        return result
+    return None
+
+
+def _configured_neo4j_uri() -> str | None:
+    url = os.getenv("MEMGRAPH_URL") or os.getenv("NEO4J_URL") or os.getenv("NEO4J_URI") or os.getenv("MEMGRAPH_BOLT_URL")
+    if url:
+        return url.strip()
+    host = os.getenv("MEMGRAPH_HOST")
+    if not host:
+        return None
+    port = os.getenv("MEMGRAPH_PORT", "7687")
+    ssl_enabled = os.getenv("MEMGRAPH_SSL", "false").lower() in ("1", "true", "yes")
+    scheme = os.getenv("MEMGRAPH_SCHEME") or ("bolt+ssc" if ssl_enabled else "bolt")
+    return f"{scheme}://{host}:{port}"
+
+
 def _check_neo4j() -> dict[str, Any]:
+    status: dict[str, Any] = {
+        "reachable": False,
+        "node_count": None,
+        "expected_labels_present": False,
+    }
     try:
-        neo4j = get_neo4j()
-        if hasattr(neo4j, "run"):
-            neo4j.run("RETURN 1 AS ok")
-        elif hasattr(neo4j, "session"):
-            with neo4j.session() as session:
-                session.run("RETURN 1 AS ok").consume()
-        return {"ok": True}
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": str(exc)}
+        _run_neo4j("RETURN 1 AS ok")
+        status["reachable"] = True
+    except Exception:  # noqa: BLE001
+        return status
+
+    try:
+        record = _single_record(_run_neo4j("MATCH (n) RETURN count(n) AS node_count"))
+        status["node_count"] = int((record or {}).get("node_count"))
+    except Exception:  # noqa: BLE001
+        status["node_count"] = None
+
+    try:
+        record = _single_record(
+            _run_neo4j(
+                """
+                MATCH (n)
+                WITH labels(n) AS node_labels
+                UNWIND node_labels AS label
+                RETURN collect(DISTINCT label) AS labels
+                """
+            )
+        )
+        labels = set((record or {}).get("labels") or [])
+        status["expected_labels_present"] = {"Session", "Entity", "Checkpoint"}.issubset(labels)
+    except Exception:  # noqa: BLE001
+        status["expected_labels_present"] = False
+
+    return status
 
 
 def _check_chroma() -> dict[str, Any]:
+    status: dict[str, Any] = {
+        "reachable": False,
+        "collection_count": None,
+    }
     try:
         chroma = get_chroma()
-        user_collection = get_or_create_user_collection(chroma)
-        global_collection = get_or_create_global_collection(chroma)
-        return {
-            "ok": True,
-            "path": os.getenv("CHROMA_PATH", "./chroma_db"),
-            "collections": {
-                ORANGE_USER_VECTOR_COLLECTION: user_collection.count(),
-                ORANGE_GLOBAL_VECTOR_COLLECTION: global_collection.count(),
-            },
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "path": os.getenv("CHROMA_PATH", "./chroma_db"), "error": str(exc)}
+        status["reachable"] = True
+        if hasattr(chroma, "count_collections"):
+            status["collection_count"] = int(chroma.count_collections())
+        elif hasattr(chroma, "list_collections"):
+            status["collection_count"] = len(chroma.list_collections())
+    except Exception:  # noqa: BLE001
+        pass
+    return status
+
+
+def _auth_status() -> dict[str, Any]:
+    token = (_REQUEST_BEARER_TOKEN.get() or "").strip()
+    status: dict[str, Any] = {
+        "token_present": bool(token),
+        "token_valid": False,
+        "user_email": None,
+        "token_expires_at": None,
+        "days_until_expiry": None,
+    }
+    if not token:
+        return status
+
+    payload = decode_mcp_token(token)
+    if payload is not None:
+        exp = int(payload.get("exp") or 0)
+        expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+        seconds_until_expiry = max(0, exp - int(datetime.now(timezone.utc).timestamp()))
+        status.update(
+            {
+                "token_valid": True,
+                "user_email": payload.get("email"),
+                "token_expires_at": expires_at.isoformat(),
+                "days_until_expiry": seconds_until_expiry // 86400,
+            }
+        )
+        return status
+
+    token_email = _token_email_map().get(token)
+    if token in _token_email_map():
+        status.update(
+            {
+                "token_valid": True,
+                "user_email": token_email,
+            }
+        )
+    return status
+
+
+def _mode() -> str:
+    transport = (os.getenv("ORANGE_MCP_TRANSPORT") or "stdio").strip().lower()
+    if _REQUEST_BEARER_TOKEN.get() or transport in {"http", "streamable-http", "sse"}:
+        return "remote"
+    return "local"
+
+
+def _neo4j_shared_with_frontend() -> bool | None:
+    frontend_uri = (os.getenv("FRONTEND_NEO4J_URI") or "").strip()
+    if not frontend_uri:
+        return None
+    backend_uri = (_configured_neo4j_uri() or "").strip()
+    return bool(backend_uri and backend_uri == frontend_uri)
+
+
+def _status_warnings(
+    *,
+    neo4j_status: dict[str, Any],
+    auth_status: dict[str, Any],
+    neo4j_shared_with_frontend: bool | None,
+) -> list[str]:
+    warnings: list[str] = []
+    if neo4j_shared_with_frontend is False:
+        warnings.append(
+            "Neo4j instance differs from frontend config. Nodes written via MCP will not appear on the website. "
+            "Set ORANGE_NEO4J_URI to the same instance used by Vercel."
+        )
+    days_until_expiry = auth_status.get("days_until_expiry")
+    if days_until_expiry is not None and int(days_until_expiry) <= 7:
+        warnings.append(f"MCP token expires in {days_until_expiry} days. Re-authenticate at /mcp.")
+    if neo4j_status.get("expected_labels_present") is False:
+        warnings.append(
+            "Neo4j graph is missing expected labels (Session, Entity, Checkpoint). "
+            "Run schema initialization or complete at least one full session."
+        )
+    return warnings
 
 
 @_APP.tool()
 async def orange_status() -> dict:
-    """Check whether the Orange MCP server can reach its graph/vector stores and explain the completion policy."""
+    """Return structured Orange MCP health, auth, schema, and tool information."""
 
     neo4j_status = _check_neo4j()
     chroma_status = _check_chroma()
+    auth_status = _auth_status()
+    neo4j_shared_with_frontend = _neo4j_shared_with_frontend()
     return {
-        "service": "orange-mcp",
-        "ok": bool(neo4j_status.get("ok") and chroma_status.get("ok")),
-        "completion_policy": COMPLETION_POLICY,
-        "environment": {
-            "neo4j_configured": _is_env_configured("MEMGRAPH_URL", "NEO4J_URL", "NEO4J_URI", "MEMGRAPH_HOST"),
-            "neo4j_user_configured": _is_env_configured("MEMGRAPH_USERNAME", "NEO4J_USERNAME", "NEO4J_USER"),
-            "neo4j_password_configured": _is_env_configured("MEMGRAPH_PASSWORD", "NEO4J_PASSWORD"),
-            "openai_or_nvidia_configured": _is_env_configured("OPENAI_API_KEY", "NVIDIA_API_KEY"),
-            "postgres_configured": _is_env_configured("SUPABASE_DB_URL", "POSTGRES_DSN", "DATABASE_URL"),
-            "chroma_path": os.getenv("CHROMA_PATH", "./chroma_db"),
-            "default_user_email_configured": bool(_default_user_email(None)),
-            "remote_auth_configured": (
-                bool(_token_email_map())
-                or _signed_tokens_configured()
-                or _truthy_env("ORANGE_MCP_ALLOW_UNAUTHENTICATED")
-            ),
-        },
         "neo4j": neo4j_status,
         "chroma": chroma_status,
-        "tools": [
-            "orange_status",
-            "ping_context",
-            "complete_conversation",
-            "store_session",
-            "inspect_graph",
-            "get_node",
-            "get_session_graph",
-            "list_sessions",
-            "chroma_peek",
-        ],
+        "auth": auth_status,
+        "mode": _mode(),
+        "neo4j_shared_with_frontend": neo4j_shared_with_frontend,
+        "warnings": _status_warnings(
+            neo4j_status=neo4j_status,
+            auth_status=auth_status,
+            neo4j_shared_with_frontend=neo4j_shared_with_frontend,
+        ),
+        "tool_list": TOOL_LIST,
     }
 
 
-@_APP.tool()
-async def ping_context(
+@_APP.tool(description=RECALL_MEMORY_DESCRIPTION)
+async def recall_memory(
     query: str,
     user_id: str = "",
     source: str = "mcp",
@@ -359,15 +536,11 @@ async def ping_context(
     company: str | None = None,
     min_score: float = 0.70,
 ) -> dict:
-    """Retrieve relevant Orange memory before answering a user.
-
-    Use this near the start of a coding-agent turn. Pass the current user request as `query`,
-    `user_email` for private memory, and `company` or `org_id` for company-scoped shared memory.
-    """
+    """Retrieve relevant Orange memory before coding or problem-solving work."""
 
     resolved_email = _default_user_email(user_email)
     identity = (user_id or resolved_email or "").strip()
-    req = PingContextRequest(
+    req = RecallMemoryRequest(
         query=query,
         user_id=identity,
         source=source,
@@ -377,11 +550,11 @@ async def ping_context(
         company=company,
         min_score=min_score,
     )
-    resp = await handle_ping_context(req, neo4j=get_neo4j(), chroma=get_chroma())
+    resp = await handle_recall_memory(req, neo4j=get_neo4j(), chroma=get_chroma())
     return asdict(resp)
 
 
-@_APP.tool()
+@_APP.tool(description=COMPLETE_CONVERSATION_DESCRIPTION)
 async def complete_conversation(
     transcript: str = "",
     source: str = "mcp",
@@ -396,6 +569,12 @@ async def complete_conversation(
     source_url: str | None = None,
     metadata: dict[str, Any] | None = None,
     contribute_to_global: bool = False,
+    summary: str = "",
+    key_entities: list[str] = [],
+    decisions: list[str] = [],
+    problems_solved: list[str] = [],
+    worth_storing: bool | None = None,
+    session_duration_turns: int = 0,
 ) -> dict:
     """Mark a conversation as complete and write durable Orange memory.
 
@@ -403,6 +582,9 @@ async def complete_conversation(
     Call it once at the end of a useful session using the full transcript or message list.
     Orange triage may still skip storage if the conversation contains no durable memory.
     """
+
+    if worth_storing is False:
+        return {"stored": False, "reason": "caller marked not worth storing"}
 
     resolved_email = _default_user_email(user_email)
     identity = (resolved_email or user_id or "").strip()
@@ -425,6 +607,12 @@ async def complete_conversation(
             "completed_via": "complete_conversation",
         },
         contribute_to_global=contribute_to_global,
+        summary=summary,
+        key_entities=key_entities or [],
+        decisions=decisions or [],
+        problems_solved=problems_solved or [],
+        worth_storing=worth_storing,
+        session_duration_turns=session_duration_turns,
     )
     resp = await handle_store_session(
         req,
@@ -437,6 +625,59 @@ async def complete_conversation(
     payload["completion_policy"] = COMPLETION_POLICY
     payload["stored"] = bool(payload.get("insights_stored")) and not payload.get("errors")
     return payload
+
+
+@_APP.tool(description=CHECKPOINT_CONTEXT_DESCRIPTION)
+async def checkpoint_context(
+    note: str,
+    user_email: str | None = None,
+    user_id: str = "",
+    org_id: str | None = None,
+    company: str | None = None,
+    source: str = "mcp",
+) -> dict:
+    """Write a lightweight mid-session checkpoint to Neo4j only."""
+
+    cleaned_note = (note or "").strip()
+    if not cleaned_note:
+        raise ValueError("note is required")
+    resolved_email = _default_user_email(user_email)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    params = {
+        "node_id": f"checkpoint_{uuid.uuid4().hex}",
+        "type": "checkpoint",
+        "note": cleaned_note,
+        "timestamp": timestamp,
+        "user_email": resolved_email,
+        "user_id": (user_id or resolved_email or "").strip(),
+        "org_id": org_id,
+        "company": company,
+        "source": source,
+    }
+    _run_neo4j(
+        """
+        CREATE (c:Checkpoint:Entity {
+          node_id: $node_id,
+          type: $type,
+          note: $note,
+          timestamp: $timestamp,
+          user_email: $user_email,
+          user_id: $user_id,
+          org_id: $org_id,
+          company: $company,
+          source: $source
+        })
+        """,
+        **params,
+    )
+    return {"checkpointed": True, "timestamp": timestamp}
+
+
+@_APP.resource("orange://instructions", name="orange_instructions", mime_type="text/markdown")
+def orange_instructions() -> str:
+    """Readable Orange Memory Protocol instructions for MCP clients."""
+
+    return ORANGE_INSTRUCTIONS
 
 
 @_APP.tool()

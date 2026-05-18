@@ -55,7 +55,7 @@ def mint_mcp_token(email: str, *, expires_in_days: int = 365) -> str:
     return f"{TOKEN_PREFIX}{encoded}.{signature}"
 
 
-def verify_mcp_token(token: str) -> str | None:
+def decode_mcp_token(token: str) -> dict[str, Any] | None:
     raw = str(token or "").strip()
     if not raw.startswith(TOKEN_PREFIX):
         return None
@@ -74,6 +74,14 @@ def verify_mcp_token(token: str) -> str | None:
     if exp < int(time.time()):
         return None
     try:
-        return normalize_email(str(payload.get("email") or ""))
+        payload["email"] = normalize_email(str(payload.get("email") or ""))
     except ValueError:
         return None
+    return payload
+
+
+def verify_mcp_token(token: str) -> str | None:
+    payload = decode_mcp_token(token)
+    if payload is None:
+        return None
+    return str(payload.get("email") or "") or None

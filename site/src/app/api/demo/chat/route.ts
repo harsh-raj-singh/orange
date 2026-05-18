@@ -37,7 +37,7 @@ type MemoryMatch = {
   scope?: "user" | "global";
 };
 
-type PingContextResponse = {
+type RecallMemoryResponse = {
   matched_nodes?: Array<{
     node_type?: string;
     similarity_score?: number;
@@ -132,7 +132,7 @@ function buildOpenAIRequestBody(
   return requestBody;
 }
 
-function buildMemoryContext(memory?: PingContextResponse | null) {
+function buildMemoryContext(memory?: RecallMemoryResponse | null) {
   const nodes = memory?.matched_nodes ?? [];
   const nodeIds = memory?.node_ids_used ?? [];
 
@@ -184,7 +184,7 @@ function buildMemoryContext(memory?: PingContextResponse | null) {
 
 async function fetchMemoryContext(body: DemoChatRequest, latestUserMessage: string) {
   try {
-    const memory = await orangeBackendFetch<PingContextResponse>("/demo/ping_context", {
+    const memory = await orangeBackendFetch<RecallMemoryResponse>("/demo/recall_memory", {
       method: "POST",
       body: {
         profile: body.profile,
@@ -197,7 +197,7 @@ async function fetchMemoryContext(body: DemoChatRequest, latestUserMessage: stri
     });
     return buildMemoryContext(memory);
   } catch (error) {
-    console.warn("orange_backend_ping_failed", error);
+    console.warn("orange_backend_recall_failed", error);
     return buildMemoryContext(null);
   }
 }

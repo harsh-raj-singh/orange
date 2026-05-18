@@ -188,9 +188,10 @@ export default function McpConnectCard() {
           <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm leading-6 text-[#dbe7df]">
             <p className="font-semibold text-white">How to use Orange</p>
             <p className="mt-2">
-              Ask Codex to call <span className="font-mono text-[#f9a66b]">ping_context</span> before useful work and{" "}
-              <span className="font-mono text-[#f9a66b]">complete_conversation</span> once when the session is done. Orange
-              stores durable insights under your verified email.
+              Ask Codex to call <span className="font-mono text-[#f9a66b]">recall_memory</span> before useful work,{" "}
+              <span className="font-mono text-[#f9a66b]">checkpoint_context</span> when an important decision lands, and{" "}
+              <span className="font-mono text-[#f9a66b]">complete_conversation</span> once when the session is done.
+              The <span className="font-mono text-[#f9a66b]">orange_instructions</span> resource is also available for protocol guidance.
             </p>
           </div>
           <CodeBlock label="1. Add to Codex config" value={data.codex_config} />

@@ -8,8 +8,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from core.mcp_server.handlers import handle_ping_context, handle_store_session
-from core.mcp_server.models import PingContextRequest, StoreSessionRequest
+from core.mcp_server.handlers import handle_recall_memory, handle_store_session
+from core.mcp_server.models import RecallMemoryRequest, StoreSessionRequest
 from core.viz_api.dependencies import get_chroma, get_neo4j
 
 router = APIRouter()
@@ -36,7 +36,7 @@ class DemoCompletePayload(BaseModel):
     contribute_to_global: bool = True
 
 
-class DemoPingPayload(BaseModel):
+class DemoRecallPayload(BaseModel):
     profile: DemoProfile | None = None
     query: str
     source: str = "cursor"
@@ -128,10 +128,10 @@ async def complete_conversation(payload: DemoCompletePayload) -> JSONResponse:
     return JSONResponse({**_jsonable(response), "backend": "orange"})
 
 
-@router.post("/ping_context")
-async def ping_context(payload: DemoPingPayload) -> JSONResponse:
+@router.post("/recall_memory")
+async def recall_memory(payload: DemoRecallPayload) -> JSONResponse:
     user_id = _stable_user_id(payload.profile)
-    req = PingContextRequest(
+    req = RecallMemoryRequest(
         query=payload.query,
         user_id=user_id,
         source=payload.source,
@@ -142,7 +142,7 @@ async def ping_context(payload: DemoPingPayload) -> JSONResponse:
         scope=payload.scope,
     )
     try:
-        response = await handle_ping_context(req, neo4j=get_neo4j(), chroma=get_chroma())
+        response = await handle_recall_memory(req, neo4j=get_neo4j(), chroma=get_chroma())
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=502, content={"error": str(exc), "backend": "orange"})
 

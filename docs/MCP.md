@@ -4,31 +4,52 @@ Orange exposes a local stdio MCP server for coding agents. The intended loop is:
 
 ```text
 agent starts work
-  -> ping_context(query, user_email)
+  -> recall_memory(query, user_email)
   -> use returned memory while answering
+agent finds an important decision/root cause/non-obvious fix
+  -> checkpoint_context(note, user_email)
 agent reaches final answer / user says done
-  -> complete_conversation(transcript or messages, user_email)
+  -> complete_conversation(transcript or messages, user_email, summary/key_entities/decisions/problems_solved)
   -> Orange triages and writes Insight nodes
 ```
 
-The write path is session-level. Nothing is extracted mid-session. The agent calls `complete_conversation` once when the session is meaningfully done.
+The durable extraction write path is session-level. `checkpoint_context` is a lightweight Neo4j-only safety marker for important mid-session context. The agent calls `complete_conversation` once when the session is meaningfully done.
 
 ## Conversation Completion Rule
 
-For now, a conversation is complete when either:
+## Orange Memory Protocol
 
-- the agent is about to send its final answer for a useful work session
-- the user says `done`, `remember this`, `store this`, `mark complete`, or `wrap this`
+### START of every session
+Call recall_memory with a short query describing the current task before 
+doing any work. This hydrates context from prior sessions.
 
-Do not call completion for trivial greetings or generic one-off answers unless the user stated durable facts, preferences, company workflow details, or steering that future agents should remember.
+### DURING a session
+Call checkpoint_context whenever:
+- A non-obvious solution is found
+- An important architectural decision is made
+- A root cause is identified
+Do NOT call complete_conversation mid-session.
 
-Orange still runs triage after completion. If the session has no durable memory, `complete_conversation` returns `skipped_reason` and writes no nodes.
+### END of session (final answer given, or user says done/remember/store/wrap)
+Call complete_conversation with transcript or messages.
+- Provide summary, key_entities, decisions, problems_solved if possible.
+- Set worth_storing=false for trivial sessions (greetings, generic Q&A, 
+  one-off lookups with no durable content).
+- Leave worth_storing unset to let Orange triage decide automatically.
+- This must be the LAST tool call before ending the response.
+
+### Identity
+Always pass user_email when available. For org/company memory, pass company 
+or org_id. If using a remote MCP token, user_email is inferred automatically.
+
+Orange still runs triage after completion unless `worth_storing=true` is supplied. If the session has no durable memory, `complete_conversation` returns `skipped_reason` and writes no nodes.
 
 ## Tools
 
-- `orange_status`: verifies Neo4j, Chroma, env configuration, and returns the completion policy.
-- `ping_context`: retrieves private user memory and company-scoped shared memory before answering.
-- `complete_conversation`: preferred write tool for Claude Code, Codex, Cursor, and other MCP clients.
+- `orange_status`: verifies Neo4j, Chroma, auth, schema labels, and frontend/backend Neo4j alignment.
+- `recall_memory`: retrieves private user memory and company-scoped shared memory before answering.
+- `checkpoint_context`: writes a lightweight Neo4j-only checkpoint mid-session.
+- `complete_conversation`: preferred final write tool for Claude Code, Codex, Cursor, and other MCP clients.
 - `store_session`: low-level ingestion tool kept for compatibility.
 - `inspect_graph`, `get_node`, `get_session_graph`, `list_sessions`, `chroma_peek`: inspection/debugging tools.
 - `resolve_problem`: legacy compatibility tool for old Problem/Solution graphs.
@@ -50,6 +71,7 @@ Required `.env` values for real writes:
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.4-nano
 NEO4J_URI=bolt://...
+FRONTEND_NEO4J_URI=bolt://... # optional, for orange_status alignment checks
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=...
 CHROMA_PATH=./chroma_db
@@ -220,6 +242,16 @@ At the start of a useful turn:
 }
 ```
 
+Mid-session, when an important finding should not be lost:
+
+```json
+{
+  "note": "Root cause: FastAPI middleware was registered after route setup.",
+  "user_email": "harsh@example.com",
+  "source": "codex"
+}
+```
+
 At completion:
 
 ```json
@@ -227,6 +259,10 @@ At completion:
   "source": "codex",
   "user_email": "harsh@example.com",
   "transcript": "full conversation transcript",
+  "summary": "Fixed the recurring CORS preflight failure by moving middleware registration before route setup.",
+  "key_entities": ["server.py", "CORSMiddleware"],
+  "decisions": ["Keep middleware registration before routers."],
+  "problems_solved": ["OPTIONS preflight returned 405."],
   "contribute_to_global": false
 }
 ```
@@ -253,8 +289,8 @@ If no nodes appear, check the `skipped_reason`. Generic tasks like `create a web
 
 ## Troubleshooting
 
-- `orange_status.neo4j.ok=false`: check `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD`.
-- `orange_status.chroma.ok=false`: check `CHROMA_PATH` and filesystem permissions.
+- `orange_status.neo4j.reachable=false`: check `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD`.
+- `orange_status.chroma.reachable=false`: check `CHROMA_PATH` and filesystem permissions.
 - `complete_conversation` returns `skipped_reason`: triage decided the session had no durable user/company memory.
 - Nodes do not show on Vercel: confirm the MCP server and Railway backend point to the same `NEO4J_URI`, and open the site with the same email.
 - Claude/Codex cannot see tools: verify the configured Python path, `PYTHONPATH`, and run the MCP client's `/mcp` diagnostics.

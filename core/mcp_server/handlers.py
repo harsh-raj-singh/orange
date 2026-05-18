@@ -24,8 +24,8 @@ from core.graph_upsert.embeddings import build_solution_embed_string
 from core.graph_upsert.writer import content_hash
 from core.mcp_server.models import (
     MatchedNode,
-    PingContextRequest,
-    PingContextResponse,
+    RecallMemoryRequest,
+    RecallMemoryResponse,
     ResolveProblemRequest,
     ResolveProblemResponse,
     StoreSessionRequest,
@@ -183,9 +183,9 @@ def _fetch_insight_node(neo4j, node_id: str) -> dict | None:
     )
 
 
-async def handle_ping_context(
-    req: PingContextRequest, *, neo4j: object, chroma: object
-) -> PingContextResponse:
+async def handle_recall_memory(
+    req: RecallMemoryRequest, *, neo4j: object, chroma: object
+) -> RecallMemoryResponse:
     query = (req.query or "").strip()
     if not query:
         raise ValueError("query is required")
@@ -308,7 +308,7 @@ async def handle_ping_context(
         if label_key:
             by_label[label_key] = match
 
-    return PingContextResponse(
+    return RecallMemoryResponse(
         query=query,
         matched_nodes=matched_nodes,
         node_ids_used=node_ids_used,
@@ -402,6 +402,33 @@ def _filter_user_hits(raw_result: dict, *, user_id: str, user_email: str = "", l
     return {"ids": [out_ids], "metadatas": [out_meta], "distances": [out_dist]}
 
 
+def _clean_string_list(values: list[str] | None) -> list[str]:
+    return [str(value).strip() for value in (values or []) if str(value).strip()]
+
+
+def _structured_completion_context(req: StoreSessionRequest) -> str:
+    sections: list[str] = []
+    summary = (req.summary or "").strip()
+    key_entities = _clean_string_list(req.key_entities)
+    decisions = _clean_string_list(req.decisions)
+    problems_solved = _clean_string_list(req.problems_solved)
+
+    if summary:
+        sections.append(f"Summary: {summary}")
+    if key_entities:
+        sections.append("Key entities:\n" + "\n".join(f"- {item}" for item in key_entities))
+    if decisions:
+        sections.append("Decisions:\n" + "\n".join(f"- {item}" for item in decisions))
+    if problems_solved:
+        sections.append("Problems solved:\n" + "\n".join(f"- {item}" for item in problems_solved))
+    if req.session_duration_turns:
+        sections.append(f"Approximate session duration turns: {int(req.session_duration_turns)}")
+
+    if not sections:
+        return ""
+    return "Caller-provided structured session summary:\n" + "\n\n".join(sections)
+
+
 async def handle_store_session(
     req: StoreSessionRequest,
     *,
@@ -411,6 +438,9 @@ async def handle_store_session(
     postgres_store: object | None = None,
 ) -> StoreSessionResponse:
     transcript = (req.transcript or "").strip()
+    structured_context = _structured_completion_context(req)
+    if not transcript and not req.messages and structured_context:
+        transcript = structured_context
     if not transcript and not req.messages:
         raise ValueError("transcript is required")
     source = _parse_source(req.source)
@@ -419,6 +449,20 @@ async def handle_store_session(
         "client_metadata": req.client_metadata or {},
         "tool_metadata": req.tool_metadata or {},
     }
+    if structured_context:
+        metadata["structured_completion_context"] = structured_context
+    if req.summary:
+        metadata["summary"] = req.summary.strip()
+    if req.key_entities:
+        metadata["key_entities"] = _clean_string_list(req.key_entities)
+    if req.decisions:
+        metadata["decisions"] = _clean_string_list(req.decisions)
+    if req.problems_solved:
+        metadata["problems_solved"] = _clean_string_list(req.problems_solved)
+    if req.worth_storing is not None:
+        metadata["worth_storing"] = bool(req.worth_storing)
+    if req.session_duration_turns:
+        metadata["session_duration_turns"] = int(req.session_duration_turns)
     company = (req.company or metadata.get("company") or "").strip() if isinstance(req.company or metadata.get("company"), str) else ""
     org_id = _clean_org_id(req.org_id or company)
     if company:
@@ -473,6 +517,7 @@ async def handle_store_session(
             chroma_client=chroma,
             contribute_to_global=req.contribute_to_global,
             pii_llm=llm,
+            force_worth_storing=req.worth_storing is True,
         )
     except Exception:
         if (

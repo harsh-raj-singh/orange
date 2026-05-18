@@ -85,6 +85,10 @@ bearer_token_env_var = \"ORANGE_MCP_TOKEN\"
 startup_timeout_sec = 20
 tool_timeout_sec = 180
 enabled = true
+
+# Orange tools: recall_memory retrieves prior context before work.
+# checkpoint_context saves important mid-session decisions to Neo4j only.
+# Resource: orange_instructions is readable by Codex/Claude for protocol guidance.
 """
     codex_command = (
         f"export ORANGE_MCP_TOKEN={_shell_quote(token)}\n"
