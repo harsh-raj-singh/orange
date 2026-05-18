@@ -249,6 +249,7 @@ https://site-sage-eta-18.vercel.app/mcp
 ```
 
 This page mints a personal signed MCP token and shows copyable Codex/Claude Code setup snippets.
+Users sign in with Google first; Orange verifies the Google ID token and scopes the MCP token to that email.
 
 ## Deployed Demo
 

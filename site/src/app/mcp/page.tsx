@@ -27,7 +27,7 @@ export default function McpPage() {
               Connect Orange to Codex in under a minute.
             </h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-[#cbd8cf]">
-              Generate a personal MCP token, paste the config into Codex, and Orange will remember completed agent sessions under your email.
+              Sign in with Google, paste the config into Codex, and Orange will remember completed agent sessions under your verified email.
             </p>
             <div className="mt-10">
               <McpConnectCard />

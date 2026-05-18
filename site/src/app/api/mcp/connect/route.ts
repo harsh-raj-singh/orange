@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 type ConnectResponse = {
   email: string;
+  name?: string | null;
   token: string;
   mcp_url: string;
   codex_config: string;
@@ -14,17 +15,17 @@ type ConnectResponse = {
 };
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => null)) as { email?: string } | null;
-  const email = body?.email?.trim().toLowerCase();
+  const body = (await request.json().catch(() => null)) as { credential?: string } | null;
+  const credential = body?.credential?.trim();
 
-  if (!email) {
-    return NextResponse.json({ error: "Email is required." }, { status: 400 });
+  if (!credential) {
+    return NextResponse.json({ error: "Google sign-in credential is required." }, { status: 400 });
   }
 
   try {
     const data = await orangeBackendFetch<ConnectResponse>("/mcp/connect", {
       method: "POST",
-      body: { email },
+      body: { credential },
     });
     if (!data) {
       return NextResponse.json(

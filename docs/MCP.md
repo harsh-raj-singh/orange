@@ -58,7 +58,7 @@ CHROMA_PATH=./chroma_db
 For now, treat personal email as the identity key. The server can read it from:
 
 1. explicit `user_email` in the tool call
-2. a signed self-serve MCP token minted by `/mcp/connect`
+2. a signed self-serve MCP token minted after Google sign-in at `/mcp/connect`
 3. bearer-token mapping in `ORANGE_MCP_TOKEN_EMAILS`
 4. local fallback `ORANGE_USER_EMAIL`
 
@@ -87,6 +87,13 @@ Self-serve website tokens:
 ```bash
 railway variables set ORANGE_MCP_SIGNING_SECRET=$(openssl rand -hex 32)
 railway variables set ORANGE_PUBLIC_BACKEND_URL=https://orange-api-production.up.railway.app
+railway variables set GOOGLE_CLIENT_ID=your-google-web-client-id.apps.googleusercontent.com
+```
+
+Set the same Google web client id on Vercel:
+
+```text
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-web-client-id.apps.googleusercontent.com
 ```
 
 Then users can open:
@@ -95,7 +102,7 @@ Then users can open:
 https://site-sage-eta-18.vercel.app/mcp
 ```
 
-They enter email, receive a signed bearer token, and copy the Codex config.
+They continue with Google, Orange verifies the Google ID token server-side, then returns a signed bearer token and copyable Codex config.
 
 Single-user/default token:
 
@@ -114,7 +121,7 @@ With `ORANGE_MCP_TOKEN_EMAILS`, users do not need to pass `user_email` manually;
 
 The same app still serves REST endpoints for the Vercel site, so MCP-written Neo4j nodes are visible to the deployed graph as long as Railway and the MCP server use the same Neo4j database.
 
-Current security note: `/mcp/connect` trusts the email the user enters. This is intentionally simple for the desktop beta. Before broader usage, replace this with email OTP or OAuth so users prove ownership of the email before a token is minted.
+Current security note: `/mcp/connect` verifies a Google ID token before minting an Orange MCP token. This is good enough for the desktop beta. Full MCP OAuth can replace the token-copy flow later, using Codex's `codex mcp login <server-name>` path.
 
 ## Claude Code Remote
 
