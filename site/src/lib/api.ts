@@ -9,6 +9,11 @@ type BackendFallbackOptions<TBackend, TResult> = {
     method?: string;
     body?: unknown;
     signal?: AbortSignal;
+    cache?: RequestCache;
+    next?: {
+      revalidate?: number | false;
+      tags?: string[];
+    };
   };
   warning: string;
   transform: (data: TBackend) => TResult | null | Promise<TResult | null>;

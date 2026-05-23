@@ -556,7 +556,7 @@ export default function MemoryGraph() {
     return next;
   }, []);
 
-  const fetchGraph = useCallback(async (showRefreshing = true) => {
+  const fetchGraph = useCallback(async (showRefreshing = true, refresh = false) => {
     if (showRefreshing) {
       setIsRefreshing(true);
     }
@@ -569,9 +569,10 @@ export default function MemoryGraph() {
       if (company) {
         params.set("company", company);
       }
-      const response = await fetch(`/api/demo/memory-graph?${params.toString()}`, {
-        cache: "no-store",
-      });
+      if (refresh) {
+        params.set("refresh", String(Date.now()));
+      }
+      const response = await fetch(`/api/demo/memory-graph?${params.toString()}`);
 
       if (!response.ok) {
         throw new Error(`Graph request failed: ${response.status}`);
@@ -628,7 +629,7 @@ export default function MemoryGraph() {
     }, 0);
 
     const handleGraphUpdate = () => {
-      void fetchGraph();
+      void fetchGraph(true, true);
     };
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible" && isGraphVisibleRef.current) {
@@ -689,9 +690,7 @@ export default function MemoryGraph() {
       if (company) {
         params.set("company", company);
       }
-      const response = await fetch(`/api/demo/memory-graph/${encodeURIComponent(node.id)}?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const response = await fetch(`/api/demo/memory-graph/${encodeURIComponent(node.id)}?${params.toString()}`);
 
       if (!response.ok) {
         throw new Error(`Node detail request failed: ${response.status}`);
