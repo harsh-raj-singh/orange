@@ -147,6 +147,11 @@
             <li>The memory graph does not have a requestAnimationFrame simulation loop. Its periodic backend refresh now pauses while the graph section is off-screen.</li>
             <li>The hero image is still preloaded, and now has explicit responsive sizes plus an allowed image quality so Next.js can choose a better source size without runtime warnings.</li>
             <li>GSAP animations now skip missing optional targets instead of logging noisy runtime warnings.</li>
+            <li>User and global extraction now run at the same time after the global transcript is scrubbed. This removes one sequential LLM pipeline from the completion path.</li>
+            <li>An error in private/user extraction no longer prevents shared/global extraction from running. Each scope reports its own errors.</li>
+            <li>LLM retries now wait briefly before retrying, so rate limits are not retried three times in the same instant.</li>
+            <li>Chroma collection handles are cached instead of being looked up or created repeatedly during every graph write.</li>
+            <li>Neo4j graph writes from completed-session extraction now run in a worker thread, so synchronous driver calls do not block the FastAPI event loop.</li>
             <li>The LLM JSON parser now tolerates common model formatting mistakes, including fenced JSON and invalid escaped backticks, without breaking the extraction pipeline.</li>
           </ul>
         </section>
@@ -161,6 +166,8 @@
             <li>I kept LLM parser recovery narrow: it repairs invalid escape characters but does not try to guess missing keys or rewrite malformed business content.</li>
             <li>Node drag updates use <code>left/top</code> because this graph already uses CSS transforms for centering, hover, and entry animation. This keeps the same visual behavior while avoiding per-pixel React renders.</li>
             <li>I used Lenis' own <code>scroll</code> event for scroll-aware effects instead of mixing Lenis with a native window scroll listener.</li>
+            <li>I kept the Neo4j sync driver for now but moved completed-session writes off the event loop with <code>asyncio.to_thread</code>. A full async-driver migration is cleaner, but larger and riskier.</li>
+            <li>I cached LLM config after the first successful lookup instead of failing at module import, because tests and local scripts import parser helpers without production API keys.</li>
           </ul>
         </section>
 
@@ -181,6 +188,8 @@
             <li>Background processing would reduce perceived latency, but it is a bigger architecture change. I left that as a next step rather than mixing it into this fix pass.</li>
             <li>During drag, SVG edge lines and labels are also updated through refs. This avoids recalculating and re-rendering every edge on every pointer event.</li>
             <li>Graph refresh still runs once on load so the section is ready when someone scrolls to it, but repeat polling waits until the graph is actually visible.</li>
+            <li>Running user/global extraction concurrently increases parallel load on the LLM provider, but it shortens the user-facing completion request and keeps both scopes independent.</li>
+            <li>The Chroma cache is process-local. A restarted Railway/Vercel process will rebuild handles once, which is fine and safer than persisting client objects outside the process.</li>
           </ul>
         </section>
 

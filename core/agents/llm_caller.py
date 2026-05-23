@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -13,6 +14,7 @@ load_dotenv(override=True)
 
 _CLIENT: AsyncOpenAI | None = None
 _CLIENT_SETTINGS: tuple[str, str | None] | None = None
+_LLM_CONFIG: tuple[str, str, str | None] | None = None
 MAX_RETRIES = 3
 _INVALID_JSON_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])')
 
@@ -92,6 +94,10 @@ def _parse_llm_json(raw_text: str) -> Any:
 
 
 def _resolve_llm_config() -> tuple[str, str, str | None]:
+    global _LLM_CONFIG
+    if _LLM_CONFIG is not None:
+        return _LLM_CONFIG
+
     api_key = (os.getenv("OPENAI_API_KEY") or os.getenv("NVIDIA_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("Missing OPENAI_API_KEY or NVIDIA_API_KEY.")
@@ -108,7 +114,12 @@ def _resolve_llm_config() -> tuple[str, str, str | None]:
         or os.getenv("NVIDIA_BASE_URL")
         or os.getenv("OPENAI_BASE_URL")
     )
-    return api_key, model, base_url.strip() if isinstance(base_url, str) and base_url.strip() else None
+    _LLM_CONFIG = (api_key, model, base_url.strip() if isinstance(base_url, str) and base_url.strip() else None)
+    return _LLM_CONFIG
+
+
+async def _sleep_before_retry(attempt: int) -> None:
+    await asyncio.sleep(2 ** (attempt - 1))
 
 
 async def call_llm_json(system_prompt: str, user_content: str) -> Any:
@@ -162,10 +173,12 @@ async def call_llm_json(system_prompt: str, user_content: str) -> Any:
             last_exc = ValueError(f"LLM returned invalid JSON on attempt {attempt}.\nRaw:\n{cleaned}")
             if attempt == MAX_RETRIES:
                 break
+            await _sleep_before_retry(attempt)
         except Exception as exc:  # noqa: BLE001
             print(f"[LLM] attempt={attempt} ERROR after {time.time()-t0:.1f}s: {exc}", flush=True)
             last_exc = exc
             if attempt == MAX_RETRIES:
                 break
+            await _sleep_before_retry(attempt)
 
     raise TimeoutError(f"LLM call failed after {MAX_RETRIES} attempts. Last error: {last_exc}")

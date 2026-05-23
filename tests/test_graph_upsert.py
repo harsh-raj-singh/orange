@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from core.agents.extraction_outputs import EnrichedProblem, ExtractedSolution, IssueAgentOutput, SolutionAgentOutput
-from core.graph_schema_v2 import ConfidenceLevel, Session, SolutionOutcome, SourceType
+from typing import Any
+
+from core.graph_schema_v2 import ConfidenceLevel, Insight, Session, SolutionOutcome, SourceType
 from core.graph_upsert.writer import GraphUpsertEngine
 
 
@@ -99,3 +101,51 @@ def test_upsert_v2_chroma_documents_point_to_neo4j_node_ids(mock_neo4j, mock_chr
     assert problem_upsert["ids"][0].startswith("problem_")
     assert metadata["neo4j_node_id"].startswith("problem_")
     assert metadata["source"] == "claude"
+
+
+def test_graph_upsert_engine_reuses_collection_handle(mock_neo4j) -> None:
+    class CountingCollection:
+        def __init__(self) -> None:
+            self.upserts: list[dict[str, Any]] = []
+
+        def query(self, **_kwargs: Any) -> dict[str, Any]:
+            return {"ids": [[]], "distances": [[]], "metadatas": [[]]}
+
+        def upsert(self, **kwargs: Any) -> None:
+            self.upserts.append(kwargs)
+
+    class CountingChroma:
+        def __init__(self) -> None:
+            self.collection = CountingCollection()
+            self.collection_names: list[str] = []
+
+        def get_or_create_collection(self, name: str, **_kwargs: Any) -> CountingCollection:
+            self.collection_names.append(name)
+            return self.collection
+
+    chroma = CountingChroma()
+    session = Session(node_id="session-cache", source=SourceType.CURSOR, title="cache", summary="summary")
+    insight = Insight(
+        user_id="dev@example.com",
+        user_email="dev@example.com",
+        what="cached collection handles avoid repeated Chroma setup",
+        why=None,
+        how=None,
+        display_label="Cached Chroma collection",
+        display_summary="The writer should resolve the user collection once for a Chroma client.",
+        raw_session_id=session.node_id,
+        source=SourceType.CURSOR,
+    )
+
+    engine = GraphUpsertEngine(neo4j=mock_neo4j, chroma=chroma)
+
+    assert chroma.collection_names == []
+
+    engine.upsert_insights(session=session, user_id="dev@example.com", insights=[insight])
+    GraphUpsertEngine(neo4j=mock_neo4j, chroma=chroma).upsert_insights(
+        session=session,
+        user_id="dev@example.com",
+        insights=[insight],
+    )
+
+    assert chroma.collection_names == ["orange_user_vectors"]

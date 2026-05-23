@@ -9,6 +9,8 @@ load_dotenv()
 
 _NEO4J_CLIENT: Any | None = None
 _CHROMA_CLIENT: Any | None = None
+_USER_COLLECTION: Any | None = None
+_GLOBAL_COLLECTION: Any | None = None
 _POSTGRES_STORE: Any | None = None
 _POSTGRES_DISABLED = False
 _NEO4J_CONSTRAINTS_READY = False
@@ -81,6 +83,24 @@ def get_chroma() -> Any:
     chroma_path = os.getenv("CHROMA_PATH", default_path)
     _CHROMA_CLIENT = chromadb.PersistentClient(path=chroma_path)
     return _CHROMA_CLIENT
+
+
+def get_user_collection() -> Any:
+    global _USER_COLLECTION
+    if _USER_COLLECTION is None:
+        from core.graph_upsert.dedup import get_or_create_orange_collection
+
+        _USER_COLLECTION = get_or_create_orange_collection(get_chroma(), scope="user")
+    return _USER_COLLECTION
+
+
+def get_global_collection() -> Any:
+    global _GLOBAL_COLLECTION
+    if _GLOBAL_COLLECTION is None:
+        from core.graph_upsert.dedup import get_or_create_orange_collection
+
+        _GLOBAL_COLLECTION = get_or_create_orange_collection(get_chroma(), scope="global")
+    return _GLOBAL_COLLECTION
 
 
 def get_postgres_store() -> Any | None:

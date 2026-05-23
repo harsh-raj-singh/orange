@@ -39,6 +39,7 @@ from core.graph_upsert.embeddings import (
 )
 
 logger = logging.getLogger(__name__)
+_COLLECTION_CACHE: dict[tuple[int, str], Any] = {}
 
 
 @dataclass
@@ -88,8 +89,20 @@ class GraphUpsertEngine:
     def __init__(self, neo4j: Any, chroma: Any, llm: Any = None) -> None:
         self.neo4j = neo4j
         self.chroma = chroma
-        self.collection = get_or_create_orange_collection(chroma, scope="user")
+        self.collection: Any | None = None
         self.llm = llm
+
+    def _collection_for_scope(self, scope: str) -> Any:
+        normalized_scope = "global" if scope == "global" else "user"
+        if callable(getattr(self.chroma, "query", None)):
+            return self.chroma
+
+        cache_key = (id(self.chroma), normalized_scope)
+        collection = _COLLECTION_CACHE.get(cache_key)
+        if collection is None:
+            collection = get_or_create_orange_collection(self.chroma, scope=normalized_scope)
+            _COLLECTION_CACHE[cache_key] = collection
+        return collection
 
     def upsert(
         self,
@@ -100,6 +113,7 @@ class GraphUpsertEngine:
         concept_result: Any | None,
     ) -> UpsertSummary:
         summary = UpsertSummary()
+        self.collection = self._collection_for_scope("user")
 
         # Step 1: Session node.
         validate_node(session)
@@ -338,7 +352,7 @@ class GraphUpsertEngine:
         label_to_node_id: dict[str, str] = {}
         scope = "global" if scope == "global" else "user"
         identity = user_email or user_id
-        self.collection = get_or_create_orange_collection(self.chroma, scope=scope)
+        self.collection = self._collection_for_scope(scope)
 
         validate_node(session)
         self._merge_session(
@@ -523,7 +537,7 @@ class GraphUpsertEngine:
 
         scope = "global" if scope == "global" else "user"
         identity = user_email or user_id
-        self.collection = get_or_create_orange_collection(self.chroma, scope=scope)
+        self.collection = self._collection_for_scope(scope)
 
         validate_node(session)
         self._merge_session(
