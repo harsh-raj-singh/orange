@@ -70,6 +70,15 @@ _ORG_FACT_PATTERNS = (
     r"\bglue issue\b",
     r"\bin our org\b",
     r"\bour team\b",
+    r"\bgo[- ]to[- ]market\b",
+    r"\bgtm\b",
+    r"\bsoft launch\b",
+    r"\bpaid ads?\b",
+    r"\binbound\b",
+    r"\binvestors?\b",
+    r"\bseries a\b",
+    r"\bpricing\b",
+    r"\bdistribution\b",
 )
 
 
@@ -79,8 +88,8 @@ def _fallback_triage(transcript: str, *, scope: str = "user", company: str | Non
         if not (company or "").strip():
             return TriageDecision(worth_storing=False, reason="No company identity was supplied for shared memory.")
         if any(re.search(pattern, lowered) for pattern in _ORG_FACT_PATTERNS):
-            return TriageDecision(worth_storing=True, reason="Conversation includes a user-stated company fact.")
-        return TriageDecision(worth_storing=False, reason="No company-scoped shared fact was evident.")
+            return TriageDecision(worth_storing=True, reason="Conversation includes a durable company fact or decision.")
+        return TriageDecision(worth_storing=False, reason="No company-scoped shared fact or decision was evident.")
 
     if len(lowered.split()) < 32 and any(re.search(pattern, lowered) for pattern in _LOW_SIGNAL_PATTERNS):
         return TriageDecision(worth_storing=False, reason="Conversation was a low-signal generic exchange.")

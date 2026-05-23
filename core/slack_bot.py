@@ -1,422 +1,410 @@
 """
-ORANGE SLACK BOT
-================
-Connects Slack conversations to the Orange memory backend.
+Slack recorder for Orange memory.
 
 Flow:
-  1. User types /orange in a Slack channel  →  bot starts recording
-  2. All messages in that channel are captured and stored
-  3. User types /orange-stop                →  bot stops recording
-  4. The FULL pipeline runs:
-     • PostgreSQL  – raw conversation stored
-     • ChromaDB   – vector embeddings for similarity search
-     • Neo4j      – knowledge graph nodes and relationships
+  1. /orange starts recording messages in the current Slack channel.
+  2. /orange-stop stops recording and writes the session through the same
+     StoreSessionRequest path used by the Vercel demo graph.
+  3. /orange-status reports the current recording state.
 
-Requirements:
-  - SLACK_BOT_TOKEN   (xoxb-...)
-  - SLACK_SIGNING_SECRET
-  - SLACK_APP_TOKEN   (xapp-... for Socket Mode)
-  - POSTGRES_DSN, NVIDIA_API_KEY, CHROMA_PATH, etc. (already in your .env)
-
-Usage (Socket Mode — no public URL needed):
-  $ python -m core.slack_bot
+Run with Socket Mode:
+  python -m core.slack_bot
 """
 
-import os
-import sys
+from __future__ import annotations
+
+import asyncio
 import logging
+import os
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any
 
 from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.complete_chat_system import ChatCentricMemorySystem
+from core.mcp_server.handlers import handle_store_session
+from core.mcp_server.models import StoreSessionRequest
+from core.viz_api.dependencies import get_chroma, get_neo4j, get_postgres_store
 
 load_dotenv()
 
-# ──────────────────────────────────────────────────────────
-# LOGGING
-# ──────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("orange.slack")
 
-# ──────────────────────────────────────────────────────────
-# CONFIG
-# ──────────────────────────────────────────────────────────
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
-SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")  # Required for Socket Mode
+SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")
 
-# Orange backend config
-LLM_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("NVIDIA_API_KEY")
-LLM_MODEL = os.getenv("OPENAI_MODEL") or os.getenv("NVIDIA_MODEL") or "gpt-5.4-nano"
-CHROMA_PATH = os.getenv("CHROMA_PATH", "./chroma_db")
-VECTOR_COLLECTION = os.getenv("VECTOR_COLLECTION", "chat_memories")
-POSTGRES_DSN = os.getenv("POSTGRES_DSN")
-
-# Graph DB config
-MEMGRAPH_HOST = os.getenv("MEMGRAPH_HOST")
-MEMGRAPH_PORT = os.getenv("MEMGRAPH_PORT", "7687")
-MEMGRAPH_USERNAME = os.getenv("MEMGRAPH_USERNAME")
-MEMGRAPH_PASSWORD = os.getenv("MEMGRAPH_PASSWORD")
-MEMGRAPH_SSL = os.getenv("MEMGRAPH_SSL", "false").lower() in ("1", "true", "yes")
-MEMGRAPH_SCHEME = os.getenv("MEMGRAPH_SCHEME")
-
-if not SLACK_BOT_TOKEN:
-    raise ValueError("SLACK_BOT_TOKEN is required. Set it in .env")
-if not SLACK_APP_TOKEN:
-    raise ValueError("SLACK_APP_TOKEN is required for Socket Mode. Set it in .env")
-if not POSTGRES_DSN:
-    raise ValueError("POSTGRES_DSN is required. Set it in .env")
-if not LLM_API_KEY:
-    raise ValueError("OPENAI_API_KEY or NVIDIA_API_KEY is required. Set it in .env")
+DEFAULT_USER_EMAIL = (
+    os.getenv("ORANGE_SLACK_DEFAULT_USER_EMAIL")
+    or os.getenv("ORANGE_USER_EMAIL")
+    or ""
+).strip().lower()
+DEFAULT_COMPANY = (
+    os.getenv("ORANGE_SLACK_COMPANY")
+    or os.getenv("ORANGE_COMPANY")
+    or ""
+).strip()
 
 
-def _build_memgraph_url() -> Optional[str]:
-    """Build Memgraph/Neo4j connection URL from env vars."""
-    if not MEMGRAPH_HOST or not MEMGRAPH_USERNAME or not MEMGRAPH_PASSWORD:
-        return None
-    scheme = MEMGRAPH_SCHEME or ("bolt+ssc" if MEMGRAPH_SSL else "bolt")
-    return f"{scheme}://{MEMGRAPH_HOST}:{MEMGRAPH_PORT}"
+@dataclass
+class RecordedMessage:
+    user_id: str
+    name: str
+    email: str | None
+    text: str
+    ts: str | None = None
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
-# ──────────────────────────────────────────────────────────
-# ACTIVE RECORDING SESSIONS
-# ──────────────────────────────────────────────────────────
-# Key: channel_id → { chat_id, user_id, started_at, started_by, message_count }
-active_sessions: Dict[str, Dict] = {}
+@dataclass
+class RecordingSession:
+    session_id: str
+    channel_id: str
+    channel_name: str
+    team_id: str
+    team_domain: str
+    started_by: str
+    started_by_name: str
+    started_by_email: str | None
+    started_at: str
+    company: str
+    messages: list[RecordedMessage] = field(default_factory=list)
+    participants: dict[str, dict[str, str | None]] = field(default_factory=dict)
+
+    @property
+    def message_count(self) -> int:
+        return len(self.messages)
+
+
+active_sessions: dict[str, RecordingSession] = {}
 session_lock = threading.Lock()
-DEFAULT_STREAMLIT_USER_ID = "test_user"
+slack_client: WebClient | None = None
+_user_cache: dict[str, dict[str, str | None]] = {}
 
 
-# ──────────────────────────────────────────────────────────
-# INITIALIZE THE FULL ORANGE SYSTEM
-# ──────────────────────────────────────────────────────────
-logger.info("🍊 Initializing Orange Memory System (all 3 stores)...")
-
-memgraph_url = _build_memgraph_url()
-if memgraph_url:
-    logger.info(f"   Graph DB: {memgraph_url}")
-else:
-    logger.warning("   Graph DB: NOT CONFIGURED (skipping graph storage)")
-
-orange_system = ChatCentricMemorySystem(
-    nvidia_api_key=LLM_API_KEY,
-    nvidia_model=LLM_MODEL,
-    chroma_path=CHROMA_PATH,
-    vector_collection=VECTOR_COLLECTION,
-    memgraph_url=memgraph_url,
-    memgraph_username=MEMGRAPH_USERNAME or None,
-    memgraph_password=MEMGRAPH_PASSWORD or None,
-    postgres_dsn=POSTGRES_DSN,
-)
-
-logger.info("   ✅ PostgreSQL: connected")
-logger.info(f"   ✅ ChromaDB: {CHROMA_PATH}")
-if memgraph_url:
-    logger.info("   ✅ Graph DB: connected")
-logger.info("🍊 System initialized!")
-
-# Slack app
-app = App(
-    token=SLACK_BOT_TOKEN,
-    signing_secret=SLACK_SIGNING_SECRET,
-)
-
-# Slack client for user info lookups
-slack_client = WebClient(token=SLACK_BOT_TOKEN)
-
-# Cache for user display names
-_user_cache: Dict[str, str] = {}
+def _require_env() -> None:
+    missing = [
+        name
+        for name, value in {
+            "SLACK_BOT_TOKEN": SLACK_BOT_TOKEN,
+            "SLACK_SIGNING_SECRET": SLACK_SIGNING_SECRET,
+            "SLACK_APP_TOKEN": SLACK_APP_TOKEN,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise ValueError(f"Missing required Slack environment variables: {', '.join(missing)}")
 
 
-def _get_user_name(user_id: str) -> str:
-    """Resolve Slack user_id to display name (cached)."""
+def _client() -> WebClient:
+    global slack_client
+    if slack_client is None:
+        _require_env()
+        slack_client = WebClient(token=SLACK_BOT_TOKEN)
+    return slack_client
+
+
+def _get_user_profile(user_id: str) -> dict[str, str | None]:
     if user_id in _user_cache:
         return _user_cache[user_id]
+
+    profile = {"id": user_id, "name": user_id, "email": None}
     try:
-        result = slack_client.users_info(user=user_id)
-        name = (
-            result["user"]["profile"].get("display_name")
-            or result["user"]["profile"].get("real_name")
-            or result["user"]["name"]
+        result = _client().users_info(user=user_id)
+        user = result.get("user") or {}
+        slack_profile = user.get("profile") or {}
+        profile["name"] = (
+            slack_profile.get("display_name")
+            or slack_profile.get("real_name")
+            or user.get("name")
+            or user_id
         )
-        _user_cache[user_id] = name
-        return name
-    except Exception as e:
-        logger.warning(f"Could not resolve user {user_id}: {e}")
-        _user_cache[user_id] = user_id
-        return user_id
+        profile["email"] = (slack_profile.get("email") or "").strip().lower() or None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("slack_user_lookup_failed", extra={"user_id": user_id, "error": str(exc)})
+
+    _user_cache[user_id] = profile
+    return profile
 
 
-# ──────────────────────────────────────────────────────────
-# /orange — START RECORDING
-# ──────────────────────────────────────────────────────────
-@app.command("/orange")
-def handle_orange_start(ack, say, command):
-    """Start recording messages in this channel."""
-    ack()
+def _session_id(team_id: str, channel_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    compact = now.strftime("%Y%m%d%H%M%S")
+    team = team_id or "workspace"
+    return f"slack_{team}_{channel_id}_{compact}"
 
-    channel_id = command["channel_id"]
-    user_id = command["user_id"]
-    user_name = _get_user_name(user_id)
 
-    with session_lock:
-        if channel_id in active_sessions:
-            session = active_sessions[channel_id]
-            say(
-                f"🍊 Orange is already recording in this channel!\n"
-                f"Started by <@{session['started_by']}> • "
-                f"`{session['message_count']}` messages captured so far.\n"
-                f"Type `/orange-stop` to stop recording."
-            )
-            return
+def _session_source_url(session: RecordingSession) -> str | None:
+    if not session.team_domain:
+        return None
+    return f"https://{session.team_domain}.slack.com/archives/{session.channel_id}"
 
-        # Create a new chat session via the FULL system
-        chat_id = orange_system.create_chat(
-            user_id=DEFAULT_STREAMLIT_USER_ID
-        )
 
-        # Mark this chat as explicitly requested for memory storage
-        # This bypasses the importance filter in the extraction pipeline
-        orange_system.episodic.request_memory_extraction(
-            chat_id=chat_id,
-            reason="slack_orange_command",
-            specific_aspects=["conversation_context", "decisions", "action_items"],
-        )
+def _company_from_command(command: dict[str, Any]) -> str:
+    return DEFAULT_COMPANY or (command.get("team_domain") or command.get("team_id") or "Slack workspace")
 
-        active_sessions[channel_id] = {
-            "chat_id": chat_id,
-            "user_id": DEFAULT_STREAMLIT_USER_ID,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "started_by": user_id,
-            "message_count": 0,
+
+def _message_content(message: RecordedMessage) -> str:
+    return f"[{message.name}]: {' '.join(message.text.split())}"
+
+
+def build_store_request_from_session(
+    session: RecordingSession,
+    *,
+    ended_at: datetime | None = None,
+) -> StoreSessionRequest:
+    ended_at = ended_at or datetime.now(timezone.utc)
+    user_email = session.started_by_email or DEFAULT_USER_EMAIL or None
+    user_id = user_email or f"slack:{session.team_id or 'workspace'}:{session.started_by}"
+    participants = [
+        {
+            "id": participant["id"],
+            "name": participant.get("name"),
+            "metadata": {"email": participant.get("email")},
         }
-
-    logger.info(
-        f"🍊 Recording started in channel {channel_id} by {user_name} "
-        f"(chat_id={chat_id})"
+        for participant in session.participants.values()
+    ]
+    messages = [{"role": "user", "content": _message_content(message)} for message in session.messages]
+    transcript = "\n".join(
+        f"Turn {index} [user]: {message['content']}"
+        for index, message in enumerate(messages, start=1)
     )
 
-    say(
-        f"🍊 *Orange is now recording this conversation!*\n\n"
-        f"Started by <@{user_id}>\n"
-        f"All messages in this channel will be captured.\n\n"
-        f"When done, type `/orange-stop` to:\n"
-        f"  • Save to PostgreSQL\n"
-        f"  • Generate vector embeddings (ChromaDB)\n"
-        f"  • Extract knowledge graph (Neo4j)\n"
-        f"  • Run full memory extraction pipeline 🧠"
+    return StoreSessionRequest(
+        transcript=transcript,
+        source="slack",
+        user_id=user_id,
+        user_email=user_email,
+        session_id=session.session_id,
+        external_session_id=f"{session.team_id}:{session.channel_id}:{session.started_at}",
+        org_id=session.company,
+        company=session.company,
+        started_at=session.started_at,
+        ended_at=ended_at,
+        participants=participants,
+        source_url=_session_source_url(session),
+        client_metadata={
+            "name": "orange-slack-bot",
+            "trigger": "/orange-stop",
+            "channel_id": session.channel_id,
+            "channel_name": session.channel_name,
+            "team_id": session.team_id,
+            "team_domain": session.team_domain,
+        },
+        messages=messages,
+        metadata={
+            "title": f"Slack recording in #{session.channel_name or session.channel_id}",
+            "company": session.company,
+            "slack": {
+                "channel_id": session.channel_id,
+                "channel_name": session.channel_name,
+                "team_id": session.team_id,
+                "team_domain": session.team_domain,
+                "started_by": session.started_by,
+            },
+        },
+        contribute_to_global=True,
+        worth_storing=True,
+        session_duration_turns=len(messages),
     )
 
 
-# ──────────────────────────────────────────────────────────
-# /orange-stop — STOP RECORDING & RUN FULL PIPELINE
-# ──────────────────────────────────────────────────────────
-@app.command("/orange-stop")
-def handle_orange_stop(ack, say, command):
-    """Stop recording and trigger the FULL memory extraction pipeline."""
-    ack()
-
-    channel_id = command["channel_id"]
-    with session_lock:
-        if channel_id not in active_sessions:
-            say(
-                "🍊 Orange is not recording in this channel.\n"
-                "Type `/orange` to start recording."
-            )
-            return
-
-        session = active_sessions.pop(channel_id)
-
-    chat_id = session["chat_id"]
-    msg_count = session["message_count"]
-    started_by = session["started_by"]
-
-    if msg_count == 0:
-        say(
-            "🍊 Recording stopped, but no messages were captured.\n"
-            "Nothing to process. Type `/orange` to start a new recording."
+def _store_session(session: RecordingSession):
+    request = build_store_request_from_session(session)
+    return asyncio.run(
+        handle_store_session(
+            request,
+            neo4j=get_neo4j(),
+            chroma=get_chroma(),
+            llm=None,
+            postgres_store=get_postgres_store(),
         )
-        return
-
-    logger.info(
-        f"🍊 Recording stopped in channel {channel_id}. "
-        f"{msg_count} messages captured (chat_id={chat_id})"
     )
 
-    # Mark the chat as complete
-    orange_system.mark_complete(chat_id)
 
-    say(
-        f"🍊 *Recording stopped!* `{msg_count}` messages captured.\n\n"
-        f"🔄 *Running full memory extraction pipeline...*\n"
-        f"  • PostgreSQL ✅ (already stored)\n"
-        f"  • ChromaDB → generating embeddings...\n"
-        f"  • Neo4j → extracting knowledge graph...\n\n"
-        f"This may take a moment. I'll post the results here."
-    )
+def create_app() -> App:
+    _require_env()
+    app = App(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET)
 
-    # Run the full pipeline in a background thread so we don't block Slack
-    def _run_pipeline():
-        try:
-            result = orange_system.process_chat(chat_id)
-            status = result.get("status", "unknown")
+    @app.command("/orange")
+    def handle_orange_start(ack, say, command):
+        ack()
 
-            if status == "processed":
-                graph_nodes = result.get("graph_nodes", 0)
-                importance = result.get("importance_score", 0)
-                conv_type = result.get("conversation_type", "unknown")
-                confidence = result.get("extraction_confidence", 0)
-
-                say(
-                    f"🍊 *Memory extraction complete!* ✅\n\n"
-                    f"📊 *Results:*\n"
-                    f"  • Status: `processed`\n"
-                    f"  • Conversation type: `{conv_type}`\n"
-                    f"  • Importance score: `{importance:.2f}`\n"
-                    f"  • Extraction confidence: `{confidence:.2f}`\n"
-                    f"  • Graph nodes created: `{graph_nodes}`\n"
-                    f"  • Vector ID: `vec_{chat_id}`\n\n"
-                    f"💾 *Stored in:*\n"
-                    f"  ✅ PostgreSQL (raw conversation + extracted memory)\n"
-                    f"  ✅ ChromaDB (vector embeddings for search)\n"
-                    f"  {'✅' if graph_nodes > 0 else '⚪'} Neo4j ({graph_nodes} knowledge graph nodes)\n\n"
-                    f"Chat ID: `{chat_id}` • Started by <@{started_by}>"
-                )
-            elif status == "skipped":
-                reason = result.get("reason", "unknown")
-                say(
-                    f"🍊 *Memory extraction skipped.*\n"
-                    f"Reason: `{reason}`\n"
-                    f"The conversation wasn't deemed important enough to store as a memory.\n"
-                    f"Chat ID: `{chat_id}`"
-                )
-            else:
-                say(
-                    f"🍊 Processing returned status: `{status}`\n"
-                    f"Chat ID: `{chat_id}`"
-                )
-
-        except Exception as e:
-            logger.error(f"Pipeline failed for chat {chat_id}: {e}", exc_info=True)
-            say(
-                f"🍊 *Memory extraction failed* ❌\n"
-                f"Error: `{str(e)[:200]}`\n\n"
-                f"The raw conversation is still saved in PostgreSQL.\n"
-                f"You can retry from the Streamlit debug console.\n"
-                f"Chat ID: `{chat_id}`"
-            )
-
-    thread = threading.Thread(target=_run_pipeline, daemon=True)
-    thread.start()
-
-
-# ──────────────────────────────────────────────────────────
-# MESSAGE LISTENER — capture messages during recording
-# ──────────────────────────────────────────────────────────
-@app.event("message")
-def handle_message(event, say):
-    """Capture messages from channels where Orange is recording."""
-
-    channel_id = event.get("channel")
-    user_id = event.get("user")
-    text = event.get("text", "")
-    subtype = event.get("subtype")
-
-    # Debug: log ALL message events so we can confirm they arrive
-    logger.info(
-        f"📨 Message event received: channel={channel_id} user={user_id} "
-        f"subtype={subtype} text={text[:50] if text else '(empty)'}..."
-    )
-
-    # Skip bot messages, edits, deletes, etc.
-    if subtype is not None or not user_id or not text:
-        logger.info(f"   ↳ Skipped (subtype={subtype}, user={user_id}, text_empty={not text})")
-        return
-
-    with session_lock:
-        if channel_id not in active_sessions:
-            logger.info(f"   ↳ Channel {channel_id} is not being recorded, ignoring.")
-            return
-        session = active_sessions[channel_id]
-
-    # Store the message via the full system
-    chat_id = session["chat_id"]
-    user_name = _get_user_name(user_id)
-
-    try:
-        # Store as "user" role with the sender's name prefixed
-        orange_system.add_message(
-            chat_id=chat_id,
-            role="user",
-            content=f"[{user_name}]: {text}",
-        )
+        channel_id = command["channel_id"]
+        starter = _get_user_profile(command["user_id"])
 
         with session_lock:
             if channel_id in active_sessions:
-                active_sessions[channel_id]["message_count"] += 1
+                session = active_sessions[channel_id]
+                say(
+                    "Orange is already recording in this channel.\n"
+                    f"Started by <@{session.started_by}>. "
+                    f"`{session.message_count}` messages captured so far.\n"
+                    "Type `/orange-stop` to stop recording."
+                )
+                return
+
+            session = RecordingSession(
+                session_id=_session_id(command.get("team_id", ""), channel_id),
+                channel_id=channel_id,
+                channel_name=command.get("channel_name", ""),
+                team_id=command.get("team_id", ""),
+                team_domain=command.get("team_domain", ""),
+                started_by=command["user_id"],
+                started_by_name=starter["name"] or command["user_id"],
+                started_by_email=starter.get("email") or DEFAULT_USER_EMAIL or None,
+                started_at=datetime.now(timezone.utc).isoformat(),
+                company=_company_from_command(command),
+            )
+            session.participants[command["user_id"]] = {
+                "id": command["user_id"],
+                "name": starter["name"],
+                "email": starter.get("email") or DEFAULT_USER_EMAIL or None,
+            }
+            active_sessions[channel_id] = session
 
         logger.info(
-            f"   ✅ Captured message #{active_sessions.get(channel_id, {}).get('message_count', '?')} "
-            f"from {user_name}: {text[:80]}"
+            "slack_recording_started",
+            extra={"channel_id": channel_id, "session_id": session.session_id},
         )
-    except Exception as e:
-        logger.error(f"Failed to store message: {e}", exc_info=True)
+        say(
+            "Orange is now recording this conversation.\n\n"
+            f"Started by <@{command['user_id']}>.\n"
+            f"Company scope: `{session.company}`.\n"
+            "Type `/orange-stop` when the useful part is done."
+        )
 
+    @app.command("/orange-stop")
+    def handle_orange_stop(ack, say, command):
+        ack()
 
-# ──────────────────────────────────────────────────────────
-# /orange-status — CHECK RECORDING STATUS
-# ──────────────────────────────────────────────────────────
-@app.command("/orange-status")
-def handle_orange_status(ack, say, command):
-    """Check if Orange is recording in this channel."""
-    ack()
+        channel_id = command["channel_id"]
+        with session_lock:
+            session = active_sessions.pop(channel_id, None)
 
-    channel_id = command["channel_id"]
-
-    with session_lock:
-        if channel_id not in active_sessions:
-            say("🍊 Orange is not recording in this channel.")
+        if session is None:
+            say("Orange is not recording in this channel. Type `/orange` to start.")
             return
-        session = active_sessions[channel_id]
 
-    stores = []
-    stores.append("✅ PostgreSQL")
-    stores.append("✅ ChromaDB")
-    stores.append("✅ Neo4j" if orange_system.graph_driver else "⚪ Neo4j (not configured)")
+        if session.message_count == 0:
+            say("Recording stopped, but no messages were captured. Nothing was stored.")
+            return
 
-    say(
-        f"🍊 *Orange is recording!*\n\n"
-        f"• Started by: <@{session['started_by']}>\n"
-        f"• Started at: `{session['started_at']}`\n"
-        f"• Messages captured: `{session['message_count']}`\n"
-        f"• Chat ID: `{session['chat_id']}`\n\n"
-        f"*Target stores:*\n" + "\n".join(f"  {s}" for s in stores) + "\n\n"
-        "Type `/orange-stop` to stop recording and run extraction."
-    )
+        say(
+            f"Recording stopped. `{session.message_count}` messages captured.\n"
+            "Writing the session into Orange memory now."
+        )
+
+        def _run_pipeline() -> None:
+            try:
+                result = _store_session(session)
+                created = result.insights_stored + result.problems_created + result.solutions_written
+                status_line = (
+                    f"Created `{created}` graph items "
+                    f"(`{result.insights_stored}` insights, `{result.problems_created}` problems, "
+                    f"`{result.solutions_written}` solutions)."
+                )
+                if result.skipped_reason:
+                    status_line = f"Skipped: `{result.skipped_reason}`."
+                if result.errors:
+                    status_line += f"\nWarnings: `{'; '.join(result.errors)[:240]}`"
+
+                say(
+                    "Orange memory write complete.\n\n"
+                    f"{status_line}\n"
+                    f"Session: `{result.session_id}`\n"
+                    f"Company scope: `{session.company}`\n"
+                    f"User email: `{session.started_by_email or DEFAULT_USER_EMAIL or 'not available'}`"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "slack_memory_write_failed",
+                    extra={"session_id": session.session_id, "error": str(exc)},
+                    exc_info=True,
+                )
+                say(
+                    "Orange memory write failed.\n"
+                    f"Error: `{str(exc)[:220]}`\n"
+                    "The recording was not committed to the graph."
+                )
+
+        threading.Thread(target=_run_pipeline, daemon=True).start()
+
+    @app.event("message")
+    def handle_message(event, say):  # noqa: ARG001
+        channel_id = event.get("channel")
+        user_id = event.get("user")
+        text = (event.get("text") or "").strip()
+
+        if event.get("subtype") is not None or not channel_id or not user_id or not text:
+            return
+
+        with session_lock:
+            session = active_sessions.get(channel_id)
+            if session is None:
+                return
+
+        profile = _get_user_profile(user_id)
+        recorded = RecordedMessage(
+            user_id=user_id,
+            name=profile["name"] or user_id,
+            email=profile.get("email"),
+            text=text,
+            ts=event.get("ts"),
+        )
+
+        with session_lock:
+            session = active_sessions.get(channel_id)
+            if session is None:
+                return
+            session.messages.append(recorded)
+            session.participants[user_id] = {
+                "id": user_id,
+                "name": recorded.name,
+                "email": recorded.email,
+            }
+            count = session.message_count
+
+        logger.info(
+            "slack_message_captured",
+            extra={"channel_id": channel_id, "session_id": session.session_id, "count": count},
+        )
+
+    @app.command("/orange-status")
+    def handle_orange_status(ack, say, command):
+        ack()
+
+        with session_lock:
+            session = active_sessions.get(command["channel_id"])
+
+        if session is None:
+            say("Orange is not recording in this channel.")
+            return
+
+        say(
+            "Orange is recording.\n\n"
+            f"Started by: <@{session.started_by}>\n"
+            f"Messages captured: `{session.message_count}`\n"
+            f"Company scope: `{session.company}`\n"
+            f"Session: `{session.session_id}`\n\n"
+            "Type `/orange-stop` to stop and store the memory."
+        )
+
+    return app
 
 
-# ──────────────────────────────────────────────────────────
-# ENTRYPOINT
-# ──────────────────────────────────────────────────────────
-def main():
-    """Run Orange Slack bot in Socket Mode (local dev, no public URL needed)."""
-    logger.info("🍊 Starting Orange Slack Bot (Socket Mode)...")
-    logger.info(f"   PostgreSQL: {POSTGRES_DSN.split('@')[-1] if POSTGRES_DSN else 'NOT SET'}")
-    logger.info(f"   ChromaDB:   {CHROMA_PATH}")
-    logger.info(f"   Graph DB:   {_build_memgraph_url() or 'NOT CONFIGURED'}")
-
-    handler = SocketModeHandler(app, SLACK_APP_TOKEN)
+def main() -> None:
+    _require_env()
+    logger.info("Starting Orange Slack bot in Socket Mode")
+    handler = SocketModeHandler(create_app(), SLACK_APP_TOKEN)
     handler.start()
 
 

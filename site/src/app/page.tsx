@@ -177,7 +177,8 @@ export default function Home() {
             alt="Orange product texture"
             fill
             priority
-            sizes="100vw"
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 60vw"
+            quality={85}
             className="object-cover opacity-24"
           />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_78%_24%,rgba(255,139,61,0.28),transparent_34%),linear-gradient(115deg,#0d1210_0%,rgba(13,18,16,0.96)_40%,rgba(25,34,29,0.82)_100%)]" />

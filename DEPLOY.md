@@ -8,7 +8,7 @@ The frontend is deployed separately on Vercel. Railway should deploy only the Fa
 uvicorn core.viz_api.main:app --host 0.0.0.0 --port ${PORT:-8000}
 ```
 
-Railway uses `Dockerfile.railway` and `requirements-railway.txt` so the backend deploy does not install the frontend, Streamlit debug tools, Slack bot packages, or Torch wheels.
+Railway uses `Dockerfile.railway` and `requirements-railway.txt` so the backend deploy does not install the frontend, Streamlit debug tools, or Torch wheels. The requirements file includes Slack Bot dependencies so the same image can also be reused by a separate Slack worker service.
 
 Railway uses `/health` as a lightweight health check:
 
@@ -79,6 +79,29 @@ railway variables set NVIDIA_MODEL=...
 railway variables set OPENAI_BASE_URL=...
 railway variables set NVIDIA_BASE_URL=...
 ```
+
+## Optional Slack Recorder Service
+
+For the quickest production setup, the FastAPI service can also start the Slack Socket Mode bot in the background while keeping `/health` available for Railway:
+
+```bash
+railway variables set ENABLE_SLACK_BOT=true
+```
+
+Set these variables on the service:
+
+```bash
+railway variables set SLACK_BOT_TOKEN=xoxb-...
+railway variables set SLACK_SIGNING_SECRET=...
+railway variables set SLACK_APP_TOKEN=xapp-...
+railway variables set ORANGE_SLACK_COMPANY="Your Company Name"
+# Optional fallback if the Slack app does not have users:read.email yet:
+railway variables set ORANGE_SLACK_DEFAULT_USER_EMAIL=ranaharshraj3@gmail.com
+```
+
+Use the same Neo4j, Chroma, Postgres, and LLM variables as the FastAPI service. The Slack app needs slash commands for `/orange`, `/orange-stop`, and optionally `/orange-status`; it also needs `users:read.email` if you want private Slack notes to map to the same email-scoped user graph shown in Vercel.
+
+If the API and Slack bot need to scale independently later, split `python -m core.slack_bot` into a separate Railway worker service and keep the same environment variables there.
 
 ## Chroma Persistence
 

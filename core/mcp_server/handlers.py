@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 import re
 
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 # H6: For now store_session is implemented synchronously (no background queue)
 # to keep deterministic behavior in tests. Production can switch to async queueing.
-_STORE_SESSION_CACHE: dict[tuple[str, str, str], StoreSessionResponse] = {}
+_STORE_SESSION_CACHE: dict[tuple[str, str, str, str], StoreSessionResponse] = {}
 
 
 def _clean_org_id(value: str | None) -> str:
@@ -55,6 +57,10 @@ def _run_neo4j(neo4j: object, query: str, **params):
                 return data[0] if data else None
             return result
     raise ValueError("Neo4j client must expose run(...) or session().")
+
+
+async def _run_neo4j_async(neo4j: object, query: str, **params):
+    return await asyncio.to_thread(_run_neo4j, neo4j, query, **params)
 
 
 def _single_record(result) -> dict | None:
@@ -77,9 +83,9 @@ def _parse_source(value: str) -> SourceType:
     return source
 
 
-def _fetch_problem_node(neo4j, node_id: str) -> dict | None:
+async def _fetch_problem_node(neo4j, node_id: str) -> dict | None:
     return _single_record(
-        _run_neo4j(
+        await _run_neo4j_async(
             neo4j,
             """
         MATCH (p:Problem {node_id: $node_id})
@@ -122,9 +128,9 @@ def _fetch_problem_node(neo4j, node_id: str) -> dict | None:
     )
 
 
-def _fetch_solution_node(neo4j, node_id: str) -> dict | None:
+async def _fetch_solution_node(neo4j, node_id: str) -> dict | None:
     return _single_record(
-        _run_neo4j(
+        await _run_neo4j_async(
             neo4j,
             """
         MATCH (s:Solution {node_id: $node_id})
@@ -154,9 +160,9 @@ def _fetch_solution_node(neo4j, node_id: str) -> dict | None:
     )
 
 
-def _fetch_insight_node(neo4j, node_id: str) -> dict | None:
+async def _fetch_insight_node(neo4j, node_id: str) -> dict | None:
     return _single_record(
-        _run_neo4j(
+        await _run_neo4j_async(
             neo4j,
             """
         MATCH (i:Insight {node_id: $node_id})
@@ -237,7 +243,7 @@ async def handle_recall_memory(
             continue
 
         if node_type == "Problem":
-            row = _fetch_problem_node(neo4j, node_id=neo4j_node_id)
+            row = await _fetch_problem_node(neo4j, node_id=neo4j_node_id)
             neighborhood_keys = [
                 "attempted_solutions",
                 "resolved_by",
@@ -246,7 +252,7 @@ async def handle_recall_memory(
                 "related_problems",
             ]
         elif node_type == "Solution":
-            row = _fetch_solution_node(neo4j, node_id=neo4j_node_id)
+            row = await _fetch_solution_node(neo4j, node_id=neo4j_node_id)
             neighborhood_keys = [
                 "addresses_problem",
                 "problem_description",
@@ -256,7 +262,7 @@ async def handle_recall_memory(
                 "refined_into",
             ]
         elif node_type == "Insight":
-            row = _fetch_insight_node(neo4j, node_id=neo4j_node_id)
+            row = await _fetch_insight_node(neo4j, node_id=neo4j_node_id)
             neighborhood_keys = [
                 "raw_session_id",
                 "session_title",
@@ -406,6 +412,10 @@ def _clean_string_list(values: list[str] | None) -> list[str]:
     return [str(value).strip() for value in (values or []) if str(value).strip()]
 
 
+def _store_session_fingerprint(normalized_transcript: str) -> str:
+    return hashlib.sha256(normalized_transcript.encode()).hexdigest()[:16]
+
+
 def _structured_completion_context(req: StoreSessionRequest) -> str:
     sections: list[str] = []
     summary = (req.summary or "").strip()
@@ -491,7 +501,12 @@ async def handle_store_session(
     if not user_id:
         raise ValueError("user_id or user_email is required")
 
-    cache_key = (user_id, session_id, source.value)
+    cache_key = (
+        user_id,
+        session_id,
+        source.value,
+        _store_session_fingerprint(normalized.transcript),
+    )
     if cache_key in _STORE_SESSION_CACHE:
         return _STORE_SESSION_CACHE[cache_key]
 
@@ -581,7 +596,7 @@ async def handle_resolve_problem(
         raise ValueError("solution_that_worked is required")
 
     problem_row = _single_record(
-        _run_neo4j(
+        await _run_neo4j_async(
             neo4j,
             """
             // H6:FIND_PROBLEM_BY_LABEL
@@ -623,7 +638,7 @@ async def handle_resolve_problem(
     solution_hash = content_hash("Solution", session_id, canonical_solution_label)
     solution_id = str(
         (_single_record(
-            _run_neo4j(
+            await _run_neo4j_async(
                 neo4j,
                 """
                 // H6:UPSERT_RESOLVE_SOLUTION
@@ -658,7 +673,7 @@ async def handle_resolve_problem(
     )
 
     validate_edge(ResolvedByEdge(), problem_node, persisted_solution)
-    _run_neo4j(
+    await _run_neo4j_async(
         neo4j,
         """
         // H6:EDGE_RESOLVED_BY
@@ -671,7 +686,7 @@ async def handle_resolve_problem(
         user_id=user_id,
     )
 
-    _run_neo4j(
+    await _run_neo4j_async(
         neo4j,
         """
         // H6:SET_PROBLEM_RESOLVED

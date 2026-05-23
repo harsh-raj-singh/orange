@@ -4,8 +4,19 @@ type BackendFetchOptions = {
   signal?: AbortSignal;
 };
 
+const DEFAULT_LOCAL_BACKEND_URL = "http://127.0.0.1:8001";
+
 export function getOrangeBackendUrl() {
-  return process.env.ORANGE_BACKEND_URL?.replace(/\/+$/, "") || "";
+  const configuredUrl =
+    process.env.ORANGE_BACKEND_URL?.trim() ||
+    process.env.NEXT_PUBLIC_ORANGE_BACKEND_URL?.trim() ||
+    "";
+
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/+$/, "");
+  }
+
+  return process.env.NODE_ENV === "production" ? "" : DEFAULT_LOCAL_BACKEND_URL;
 }
 
 export async function orangeBackendFetch<T>(path: string, options: BackendFetchOptions = {}) {

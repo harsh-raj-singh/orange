@@ -30,13 +30,15 @@ GLOBAL_TRIAGE_AGENT_SYSTEM_PROMPT = """You are reviewing a conversation to decid
 produced company-scoped shared knowledge worth storing for coworkers at the same company.
 
 Store only if the user stated a durable company/org fact, workflow constraint, internal tool/process fact,
-or a technical incident/cause that would help another person in that same company.
+or a durable company decision, strategy, incident, or technical cause that would help another person in that same company.
 
 Good shared company memories:
 - "Our company uses .md files as the memory source format"
 - "This pipeline fails because of an AWS Glue issue"
 - "The data team deploys Glue jobs through Terraform"
 - "For this org, authentication depends on Okta groups named platform-admin"
+- "For Spain GTM, do a soft launch in Q3 with inbound-first distribution"
+- "Investors agreed to a 60-day timeline extension for this round"
 
 Do NOT store in company/global memory:
 - personal user preferences or identity facts

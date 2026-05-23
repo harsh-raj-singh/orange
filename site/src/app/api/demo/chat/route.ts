@@ -192,7 +192,7 @@ async function fetchMemoryContext(body: DemoChatRequest, latestUserMessage: stri
         source: "cursor",
         min_score: 0.7,
         contribute_to_global: body.contribute_to_global ?? true,
-        scope: body.contribute_to_global === false ? "user" : "both",
+        scope: "both",
       },
     });
     return buildMemoryContext(memory);

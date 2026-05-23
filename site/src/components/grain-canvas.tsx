@@ -17,9 +17,14 @@ export default function GrainCanvas() {
       return;
     }
     const drawingContext = context;
+    const bufferCanvas = document.createElement("canvas");
+    const bufferContext = bufferCanvas.getContext("2d", { alpha: true });
+    if (!bufferContext) {
+      return;
+    }
+    const offscreenContext = bufferContext;
 
-    let frame = 0;
-    let animationFrame = 0;
+    let intervalId = 0;
     let width = 0;
     let height = 0;
 
@@ -32,31 +37,33 @@ export default function GrainCanvas() {
     }
 
     function draw() {
-      frame += 1;
-      if (frame % 3 === 0) {
-        const image = drawingContext.createImageData(width, height);
-        const data = image.data;
+      const noiseSize = 160;
+      bufferCanvas.width = noiseSize;
+      bufferCanvas.height = noiseSize;
+      const image = offscreenContext.createImageData(noiseSize, noiseSize);
+      const data = image.data;
 
-        for (let index = 0; index < data.length; index += 4) {
-          const value = Math.random() * 255;
-          data[index] = value;
-          data[index + 1] = value;
-          data[index + 2] = value;
-          data[index + 3] = 18;
-        }
-
-        drawingContext.putImageData(image, 0, 0);
+      for (let index = 0; index < data.length; index += 4) {
+        const value = Math.random() * 255;
+        data[index] = value;
+        data[index + 1] = value;
+        data[index + 2] = value;
+        data[index + 3] = 16;
       }
 
-      animationFrame = window.requestAnimationFrame(draw);
+      offscreenContext.putImageData(image, 0, 0);
+      drawingContext.clearRect(0, 0, width, height);
+      drawingContext.imageSmoothingEnabled = false;
+      drawingContext.drawImage(bufferCanvas, 0, 0, width, height);
     }
 
     resize();
     draw();
+    intervalId = window.setInterval(draw, 220);
     window.addEventListener("resize", resize);
 
     return () => {
-      window.cancelAnimationFrame(animationFrame);
+      window.clearInterval(intervalId);
       window.removeEventListener("resize", resize);
     };
   }, []);

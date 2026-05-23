@@ -144,3 +144,115 @@ def test_user_and_company_pipelines_are_independent(monkeypatch, mock_neo4j, moc
     assert {metadata["scope"] for metadata in metadatas} == {"user", "global"}
     assert any(metadata["memory_kind"] == "steering" and metadata["scope"] == "user" for metadata in metadatas)
     assert any(metadata["memory_kind"] == "company_fact" and metadata["scope"] == "global" for metadata in metadatas)
+
+
+def test_user_and_company_pipelines_run_concurrently(monkeypatch, mock_neo4j, mock_chroma) -> None:
+    active_triage_calls = 0
+    max_active_triage_calls = 0
+    triage_scopes: list[str] = []
+
+    async def fake_scrub(transcript: str, **_kwargs) -> str:
+        return transcript
+
+    async def fake_triage(_transcript: str, **kwargs) -> TriageDecision:
+        nonlocal active_triage_calls, max_active_triage_calls
+        triage_scopes.append(str(kwargs.get("scope")))
+        active_triage_calls += 1
+        max_active_triage_calls = max(max_active_triage_calls, active_triage_calls)
+        await asyncio.sleep(0.01)
+        active_triage_calls -= 1
+        return TriageDecision(worth_storing=False, reason=f"{kwargs.get('scope')} skipped")
+
+    async def fail_extract(_transcript: str, **_kwargs) -> list[InsightDraft]:
+        raise AssertionError("extractor should not run when triage skips")
+
+    monkeypatch.setattr("core.agents.orchestrator.scrub_pii_transcript", fake_scrub)
+    monkeypatch.setattr("core.agents.orchestrator.run_triage_agent", fake_triage)
+    monkeypatch.setattr("core.agents.orchestrator.extract_insights", fail_extract)
+
+    normalized = normalize_ingestion_request(
+        SessionIngestionRequest(
+            source="cursor",
+            session_id="session-concurrent",
+            user_id="dev@example.com",
+            user_email="dev@example.com",
+            org_id="acme",
+            transcript="Turn 1 [user]: Store this company fact.",
+            metadata={"profile": {"company": "Acme"}},
+        )
+    )
+
+    result = asyncio.run(
+        run_extraction_pipeline(
+            session_id="session-concurrent",
+            user_id="dev@example.com",
+            transcript=normalized.transcript,
+            source=SourceType.CURSOR,
+            neo4j_client=mock_neo4j,
+            chroma_client=mock_chroma,
+            contribute_to_global=True,
+            normalized_session=normalized,
+        )
+    )
+
+    assert result["insights_stored"] == 0
+    assert set(triage_scopes) == {"user", "global"}
+    assert max_active_triage_calls == 2
+
+
+def test_user_pipeline_error_does_not_skip_global_pipeline(monkeypatch, mock_neo4j, mock_chroma) -> None:
+    async def fake_scrub(transcript: str, **_kwargs) -> str:
+        return transcript
+
+    async def fake_triage(_transcript: str, **_kwargs) -> TriageDecision:
+        return TriageDecision(worth_storing=True, reason="durable")
+
+    async def fake_extract(_transcript: str, **kwargs) -> list[InsightDraft]:
+        if kwargs.get("scope") == "user":
+            raise RuntimeError("user extractor temporary failure")
+        return [
+            InsightDraft(
+                what="company launch plan belongs in shared memory",
+                why=None,
+                how=None,
+                outcome="exploratory",
+                memory_kind="company_fact",
+                tags=["gtm"],
+                display_label="Shared launch plan",
+                display_summary="The company launch plan should be retrievable as shared memory.",
+            )
+        ]
+
+    monkeypatch.setattr("core.agents.orchestrator.scrub_pii_transcript", fake_scrub)
+    monkeypatch.setattr("core.agents.orchestrator.run_triage_agent", fake_triage)
+    monkeypatch.setattr("core.agents.orchestrator.extract_insights", fake_extract)
+
+    normalized = normalize_ingestion_request(
+        SessionIngestionRequest(
+            source="cursor",
+            session_id="session-user-error-global-ok",
+            user_id="dev@example.com",
+            user_email="dev@example.com",
+            org_id="acme",
+            transcript="Turn 1 [user]: Company launch plan is soft launch first.",
+            metadata={"profile": {"company": "Acme"}},
+        )
+    )
+
+    result = asyncio.run(
+        run_extraction_pipeline(
+            session_id="session-user-error-global-ok",
+            user_id="dev@example.com",
+            transcript=normalized.transcript,
+            source=SourceType.CURSOR,
+            neo4j_client=mock_neo4j,
+            chroma_client=mock_chroma,
+            contribute_to_global=True,
+            normalized_session=normalized,
+        )
+    )
+
+    assert result["insights_stored"] == 1
+    assert result["user"]["skipped_reason"] == "insight extractor failed"
+    assert result["global"]["insights_stored"] == 1
+    assert any("Insight extractor failed" in error for error in result["errors"])

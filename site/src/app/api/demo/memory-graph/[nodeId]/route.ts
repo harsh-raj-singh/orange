@@ -15,10 +15,18 @@ type RouteContext = {
 
 export async function GET(request: Request, context: RouteContext) {
   const { nodeId } = await context.params;
-  const scope = normalizeDemoGraphScope(new URL(request.url).searchParams.get("scope"));
+  const params = new URL(request.url).searchParams;
+  const scope = normalizeDemoGraphScope(params.get("scope"));
+  const userEmail = params.get("user_email")?.trim().toLowerCase();
+  const company = params.get("company")?.trim();
 
   const node = await backendJsonOrFallback({
-    path: `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood?scope=${scope}`,
+    path: `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood?${new URLSearchParams({
+      scope,
+      ...(userEmail ? { user_email: userEmail } : {}),
+      ...(userEmail ? { user_id: userEmail } : {}),
+      ...(company ? { company } : {}),
+    }).toString()}`,
     warning: "orange_backend_node_failed",
     transform: (graph: BackendGraph): DemoMemoryNodeDetail | null => {
       const transformed = transformBackendGraph(graph, scope);
@@ -40,7 +48,11 @@ export async function GET(request: Request, context: RouteContext) {
       }
       return null;
     },
-    fallback: () => getDemoMemoryNodeDetailFromStore(nodeId),
+    fallback: () =>
+      getDemoMemoryNodeDetailFromStore(nodeId, {
+        scope,
+        viewer: { email: userEmail, company },
+      }),
   });
 
   if (!node) {

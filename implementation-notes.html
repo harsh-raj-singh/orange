@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Implementation Notes</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f0e4;
+        --panel: #fffdf7;
+        --ink: #20251f;
+        --muted: #667064;
+        --line: #e2d6c6;
+        --orange: #c65a1e;
+        --orange-soft: #fff1e5;
+        --green-soft: #ecf7ef;
+        --green: #2f6f45;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(198, 90, 30, 0.14), transparent 28rem),
+          linear-gradient(180deg, #fbf4e7 0%, var(--bg) 100%);
+        color: var(--ink);
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        line-height: 1.55;
+      }
+
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 36px 20px 64px;
+      }
+
+      h1,
+      h2 {
+        margin: 0;
+        line-height: 1.12;
+      }
+
+      h1 {
+        font-size: clamp(2rem, 4vw, 3.5rem);
+        letter-spacing: -0.04em;
+      }
+
+      h2 {
+        font-size: 1.1rem;
+      }
+
+      p {
+        margin: 10px 0 0;
+      }
+
+      section {
+        margin-top: 18px;
+        padding: 18px;
+        background: rgba(255, 253, 247, 0.88);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 18px 45px rgba(76, 45, 18, 0.07);
+      }
+
+      ul {
+        margin: 12px 0 0;
+        padding-left: 20px;
+      }
+
+      li + li {
+        margin-top: 9px;
+      }
+
+      code {
+        padding: 1px 5px;
+        border-radius: 6px;
+        background: var(--orange-soft);
+        color: #7b3511;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      .intro {
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 1.05rem;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        margin-bottom: 14px;
+        padding: 7px 11px;
+        border-radius: 999px;
+        background: var(--orange-soft);
+        color: var(--orange);
+        font-size: 0.83rem;
+        font-weight: 700;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+        margin-top: 26px;
+      }
+
+      .good {
+        border-color: rgba(47, 111, 69, 0.25);
+        background: var(--green-soft);
+      }
+
+      .good h2 {
+        color: var(--green);
+      }
+
+      @media (max-width: 760px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="pill">Last updated: 2026-05-24</span>
+      <h1>Implementation Notes</h1>
+      <p class="intro">
+        This file is the plain-English log of what changed, what is intentionally different from the original behavior,
+        and what still needs your confirmation. I am keeping it short on purpose so it is useful during handoff.
+      </p>
+
+      <div class="grid">
+        <section class="good">
+          <h2>What is working now</h2>
+          <ul>
+            <li>The Vercel demo API can reach the backend graph. I confirmed the production URL returns backend-backed global nodes.</li>
+            <li>Completed demo conversations now create scoped graph memories instead of relying only on the browser fallback store.</li>
+            <li>Private notes are filtered by user email. Shared notes are filtered by company/org, so cross-app visibility works without widening private memory.</li>
+            <li>The UI now makes backend-vs-fallback status visible, which makes persistence problems easier to spot.</li>
+            <li>Graph dragging now keeps hot-path node positions in refs and writes DOM positions directly, then commits to React state only when the drag ends.</li>
+            <li>Lenis now owns scroll-derived UI updates when smooth scrolling is active. The native window scroll listener is only used when reduced-motion mode disables Lenis.</li>
+            <li>The memory graph does not have a requestAnimationFrame simulation loop. Its periodic backend refresh now pauses while the graph section is off-screen.</li>
+            <li>The hero image is still preloaded, and now has explicit responsive sizes plus an allowed image quality so Next.js can choose a better source size without runtime warnings.</li>
+            <li>GSAP animations now skip missing optional targets instead of logging noisy runtime warnings.</li>
+            <li>User and global extraction now run at the same time after the global transcript is scrubbed. This removes one sequential LLM pipeline from the completion path.</li>
+            <li>An error in private/user extraction no longer prevents shared/global extraction from running. Each scope reports its own errors.</li>
+            <li>LLM retries now wait briefly before retrying, so rate limits are not retried three times in the same instant.</li>
+            <li>Chroma collection handles are cached instead of being looked up or created repeatedly during every graph write.</li>
+            <li>Neo4j graph writes from completed-session extraction now run in a worker thread, so synchronous driver calls do not block the FastAPI event loop.</li>
+            <li>The LLM JSON parser now tolerates common model formatting mistakes, including fenced JSON and invalid escaped backticks, without breaking the extraction pipeline.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Design decisions</h2>
+          <ul>
+            <li>I treated "visible from a different app" as a hard requirement. Anything that only worked in local browser memory was not enough.</li>
+            <li>I made missing identity fail closed. If a graph request does not include the needed email or company, it should return nothing rather than risk showing the wrong memory.</li>
+            <li>I allowed GTM/company decisions to become shared memory. Personal preferences, taste, and design steering stay private.</li>
+            <li>I kept the simple synchronous completion path for now so behavior stays deterministic while we fix correctness.</li>
+            <li>I kept LLM parser recovery narrow: it repairs invalid escape characters but does not try to guess missing keys or rewrite malformed business content.</li>
+            <li>Node drag updates use <code>left/top</code> because this graph already uses CSS transforms for centering, hover, and entry animation. This keeps the same visual behavior while avoiding per-pixel React renders.</li>
+            <li>I used Lenis' own <code>scroll</code> event for scroll-aware effects instead of mixing Lenis with a native window scroll listener.</li>
+            <li>I kept the Neo4j sync driver for now but moved completed-session writes off the event loop with <code>asyncio.to_thread</code>. A full async-driver migration is cleaner, but larger and riskier.</li>
+            <li>I cached LLM config after the first successful lookup instead of failing at module import, because tests and local scripts import parser helpers without production API keys.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Intentional deviations</h2>
+          <ul>
+            <li>The frontend fallback no longer invents global notes from raw conversation text. That looked helpful, but it could make private content appear shared.</li>
+            <li>The Slack bot has been moved away from its older hardcoded <code>test_user</code> pipeline and onto the same scoped graph write path used by the Vercel demo.</li>
+            <li>I am not treating Slack MCP as the production recorder. Slack MCP is useful for checking channels/messages from this Codex session, but slash commands need the Slack app/bot service.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Tradeoffs</h2>
+          <ul>
+            <li>Keeping a fallback store makes local demos resilient, but it can hide real backend failures. The UI now labels the source so this is less confusing.</li>
+            <li>Fail-closed graph reads are safer, but they require the Vercel profile and Slack company/email identity to match.</li>
+            <li>Background processing would reduce perceived latency, but it is a bigger architecture change. I left that as a next step rather than mixing it into this fix pass.</li>
+            <li>During drag, SVG edge lines and labels are also updated through refs. This avoids recalculating and re-rendering every edge on every pointer event.</li>
+            <li>Graph refresh still runs once on load so the section is ready when someone scrolls to it, but repeat polling waits until the graph is actually visible.</li>
+            <li>Running user/global extraction concurrently increases parallel load on the LLM provider, but it shortens the user-facing completion request and keeps both scopes independent.</li>
+            <li>The Chroma cache is process-local. A restarted Railway/Vercel process will rebuild handles once, which is fine and safer than persisting client objects outside the process.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Slack status</h2>
+          <ul>
+            <li>A Slack implementation exists in <code>core/slack_bot.py</code>, local Slack secrets are present, and the code now writes via scoped Orange memory requests.</li>
+            <li>The Railway API service can start the Slack Socket Mode bot in the background when <code>ENABLE_SLACK_BOT=true</code>. This keeps the existing API healthcheck available.</li>
+            <li>For Slack-created notes to show in Vercel, the Slack user email should resolve to the same email used in the Vercel profile, such as <code>ranaharshraj3@gmail.com</code>. The current bot token does not expose email yet, so we need the Slack <code>users:read.email</code> scope or <code>ORANGE_SLACK_DEFAULT_USER_EMAIL</code>.</li>
+            <li>The Slack app also needs slash commands for <code>/orange</code>, <code>/orange-stop</code>, and optionally <code>/orange-status</code>.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>What I need confirmed</h2>
+          <ul>
+            <li>Which company name should Slack global notes use? The Vercel graph only shows global nodes when the company/org matches.</li>
+            <li>Should the Slack bot run as a separate Railway service? That is the cleanest production setup for Socket Mode.</li>
+            <li>Please confirm whether to add Slack <code>users:read.email</code> scope or use <code>ORANGE_SLACK_DEFAULT_USER_EMAIL=ranaharshraj3@gmail.com</code> for the first production Slack recorder.</li>
+          </ul>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

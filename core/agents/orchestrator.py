@@ -7,6 +7,7 @@ Execution order:
 2. Insight Extractor reads the full session transcript
 3. upsert_insights writes unified Insight nodes to Neo4j + Chroma
 """
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -181,7 +182,13 @@ async def _run_for_scope(
             )
             return {"insights_stored": 0, "edges_written": 0, "skipped_reason": triage.reason}, scoped_errors
 
-    drafts = await extract_insights(scoped_transcript, scope=scope, company=company)
+    try:
+        drafts = await extract_insights(scoped_transcript, scope=scope, company=company)
+    except Exception as exc:
+        logger.error("insight_extractor_failed", extra={"session_id": scoped_session_id, "scope": scope, "error": str(exc)})
+        scoped_errors.append(f"Insight extractor failed: {exc}")
+        return {"insights_stored": 0, "edges_written": 0, "skipped_reason": "insight extractor failed"}, scoped_errors
+
     if not drafts:
         reason = "Insight extractor returned no durable insights."
         logger.info("store_session_insights_empty", extra={"session_id": scoped_session_id, "scope": scope})
@@ -211,16 +218,17 @@ async def _run_for_scope(
     ]
 
     try:
-        engine = GraphUpsertEngine(neo4j=neo4j_client, chroma=chroma_client)
-        summary = engine.upsert_insights(
-            session=session,
-            user_id=scoped_user_id,
-            insights=insights,
-            scope=scope,
-            user_email=user_email,
-            contributed_by=contributed_by,
-            org_id=org_id,
-            company=company,
+        summary = await asyncio.to_thread(
+            lambda: GraphUpsertEngine(neo4j=neo4j_client, chroma=chroma_client).upsert_insights(
+                session=session,
+                user_id=scoped_user_id,
+                insights=insights,
+                scope=scope,
+                user_email=user_email,
+                contributed_by=contributed_by,
+                org_id=org_id,
+                company=company,
+            )
         )
     except Exception as exc:
         logger.error("upsert_insights_failed", extra={"session_id": scoped_session_id, "error": str(exc)})
@@ -275,7 +283,36 @@ async def run_extraction_pipeline(
     augmented_transcript = _augment_transcript_with_structured_context(transcript, normalized.metadata)
     org_id, company = _company_from_normalized(normalized)
 
-    user_summary, user_errors = await _run_for_scope(
+    global_summary: dict[str, int | str | None] | None = None
+    global_task = None
+    if contribute_to_global and org_id:
+        pii_values = [value for value in [normalized.user_id, normalized.user_email, *normalized.participant_ids] if value]
+        if known_pii:
+            pii_values.extend(known_pii)
+        global_source_transcript = _augment_transcript_with_structured_context(
+            _user_message_transcript(normalized),
+            normalized.metadata,
+        )
+        try:
+            scrubbed_transcript = await scrub_pii_transcript(global_source_transcript, llm=pii_llm, known_pii=pii_values)
+        except Exception as exc:
+            logger.error("pii_scrubber_failed", extra={"session_id": normalized.session_id, "error": str(exc)})
+            errors.append(f"Global PII scrubber failed: {exc}")
+        else:
+            global_task = _run_for_scope(
+                scoped_session=_global_session_from(normalized, scrubbed_transcript),
+                scoped_transcript=scrubbed_transcript,
+                scoped_user_id="global",
+                scope="global",
+                neo4j_client=neo4j_client,
+                chroma_client=chroma_client,
+                contributed_by=normalized.user_email or normalized.user_id,
+                run_triage=not force_worth_storing,
+                org_id=org_id,
+                company=company,
+            )
+
+    user_task = _run_for_scope(
         scoped_session=normalized,
         scoped_transcript=augmented_transcript,
         scoped_user_id=user_id,
@@ -287,33 +324,14 @@ async def run_extraction_pipeline(
         org_id=org_id,
         company=company,
     )
-    errors.extend(user_errors)
-    if errors:
-        return {**user_summary, "errors": errors}
 
-    global_summary: dict[str, int | str | None] | None = None
-    if contribute_to_global and org_id:
-        pii_values = [value for value in [normalized.user_id, normalized.user_email, *normalized.participant_ids] if value]
-        if known_pii:
-            pii_values.extend(known_pii)
-        global_source_transcript = _augment_transcript_with_structured_context(
-            _user_message_transcript(normalized),
-            normalized.metadata,
-        )
-        scrubbed_transcript = await scrub_pii_transcript(global_source_transcript, llm=pii_llm, known_pii=pii_values)
-        global_summary, global_errors = await _run_for_scope(
-            scoped_session=_global_session_from(normalized, scrubbed_transcript),
-            scoped_transcript=scrubbed_transcript,
-            scoped_user_id="global",
-            scope="global",
-            neo4j_client=neo4j_client,
-            chroma_client=chroma_client,
-            contributed_by=normalized.user_email or normalized.user_id,
-            run_triage=not force_worth_storing,
-            org_id=org_id,
-            company=company,
-        )
+    if global_task is not None:
+        (user_summary, user_errors), (global_summary, global_errors) = await asyncio.gather(user_task, global_task)
+        errors.extend(user_errors)
         errors.extend(f"Global {error}" for error in global_errors)
+    else:
+        user_summary, user_errors = await user_task
+        errors.extend(user_errors)
 
     total_insights = int(user_summary.get("insights_stored") or 0)
     if global_summary:

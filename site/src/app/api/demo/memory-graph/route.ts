@@ -30,7 +30,7 @@ export async function GET(request: Request) {
         ...transformBackendGraph(graph, scope),
         persisted: true,
       }),
-      fallback: () => getScopedDemoMemoryGraphSnapshot(scope),
+      fallback: () => getScopedDemoMemoryGraphSnapshot(scope, { email: userEmail, company }),
     }),
   );
 }
