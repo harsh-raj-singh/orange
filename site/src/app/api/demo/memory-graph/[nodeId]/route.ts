@@ -5,7 +5,11 @@ import { backendJsonOrFallback, normalizeDemoGraphScope } from "@/lib/api";
 import type { DemoMemoryNodeDetail } from "@/lib/demo-memory-graph";
 import { transformBackendGraph, type BackendGraph } from "@/lib/orange-graph-transform";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
+
+const GRAPH_CACHE_HEADERS = {
+  "Cache-Control": "s-maxage=30, stale-while-revalidate=60",
+};
 
 type RouteContext = {
   params: Promise<{
@@ -19,14 +23,16 @@ export async function GET(request: Request, context: RouteContext) {
   const scope = normalizeDemoGraphScope(params.get("scope"));
   const userEmail = params.get("user_email")?.trim().toLowerCase();
   const company = params.get("company")?.trim();
+  const backendParams = new URLSearchParams({
+    scope,
+    ...(userEmail ? { user_email: userEmail } : {}),
+    ...(userEmail ? { user_id: userEmail } : {}),
+    ...(company ? { company } : {}),
+  });
 
   const node = await backendJsonOrFallback({
-    path: `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood?${new URLSearchParams({
-      scope,
-      ...(userEmail ? { user_email: userEmail } : {}),
-      ...(userEmail ? { user_id: userEmail } : {}),
-      ...(company ? { company } : {}),
-    }).toString()}`,
+    path: `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood?${backendParams.toString()}`,
+    request: { next: { revalidate: 30, tags: [`memory-graph:${scope}`] } },
     warning: "orange_backend_node_failed",
     transform: (graph: BackendGraph): DemoMemoryNodeDetail | null => {
       const transformed = transformBackendGraph(graph, scope);
@@ -64,5 +70,7 @@ export async function GET(request: Request, context: RouteContext) {
     );
   }
 
-  return NextResponse.json(node);
+  return NextResponse.json(node, {
+    headers: GRAPH_CACHE_HEADERS,
+  });
 }

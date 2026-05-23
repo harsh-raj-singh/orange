@@ -2,6 +2,11 @@ type BackendFetchOptions = {
   method?: string;
   body?: unknown;
   signal?: AbortSignal;
+  cache?: RequestCache;
+  next?: {
+    revalidate?: number | false;
+    tags?: string[];
+  };
 };
 
 const DEFAULT_LOCAL_BACKEND_URL = "http://127.0.0.1:8001";
@@ -25,13 +30,22 @@ export async function orangeBackendFetch<T>(path: string, options: BackendFetchO
     return null;
   }
 
-  const response = await fetch(`${baseUrl}${path}`, {
+  const requestInit: RequestInit & { next?: BackendFetchOptions["next"] } = {
     method: options.method ?? "GET",
     signal: options.signal,
     headers: options.body ? { "Content-Type": "application/json" } : undefined,
     body: options.body ? JSON.stringify(options.body) : undefined,
-    cache: "no-store",
-  });
+  };
+  if (options.cache) {
+    requestInit.cache = options.cache;
+  } else if (!options.next) {
+    requestInit.cache = "no-store";
+  }
+  if (options.next) {
+    requestInit.next = options.next;
+  }
+
+  const response = await fetch(`${baseUrl}${path}`, requestInit);
 
   const text = await response.text();
   const data = text ? (JSON.parse(text) as T) : ({} as T);
