@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # H6: For now store_session is implemented synchronously (no background queue)
 # to keep deterministic behavior in tests. Production can switch to async queueing.
-_STORE_SESSION_CACHE: dict[tuple[str, str, str], StoreSessionResponse] = {}
+_STORE_SESSION_CACHE: dict[tuple[str, str, str, str], StoreSessionResponse] = {}
 
 
 def _clean_org_id(value: str | None) -> str:
@@ -406,6 +407,10 @@ def _clean_string_list(values: list[str] | None) -> list[str]:
     return [str(value).strip() for value in (values or []) if str(value).strip()]
 
 
+def _store_session_fingerprint(normalized_transcript: str) -> str:
+    return hashlib.sha256(normalized_transcript.encode()).hexdigest()[:16]
+
+
 def _structured_completion_context(req: StoreSessionRequest) -> str:
     sections: list[str] = []
     summary = (req.summary or "").strip()
@@ -491,7 +496,12 @@ async def handle_store_session(
     if not user_id:
         raise ValueError("user_id or user_email is required")
 
-    cache_key = (user_id, session_id, source.value)
+    cache_key = (
+        user_id,
+        session_id,
+        source.value,
+        _store_session_fingerprint(normalized.transcript),
+    )
     if cache_key in _STORE_SESSION_CACHE:
         return _STORE_SESSION_CACHE[cache_key]
 

@@ -36,6 +36,12 @@ type ChatResponse = {
   matches?: MemoryReference[];
 };
 
+type CompletionResponse = {
+  persisted?: boolean;
+  fallback?: boolean;
+  source?: "backend" | "fallback";
+};
+
 const emptyProfile: Profile = {
   name: "",
   email: "",
@@ -111,9 +117,32 @@ function memoryChipClass(memoryNode: MemoryReference) {
 }
 
 export default function TestChat() {
-  const [profile, setProfile] = useState<Profile>(emptyProfile);
+  const [profile, setProfile] = useState<Profile>(() => {
+    if (typeof window === "undefined") {
+      return emptyProfile;
+    }
+
+    try {
+      const storedProfile = window.localStorage.getItem("orange-demo-profile");
+      if (!storedProfile) {
+        return emptyProfile;
+      }
+      const parsed = JSON.parse(storedProfile) as Partial<Profile>;
+      return {
+        ...emptyProfile,
+        email: typeof parsed.email === "string" ? parsed.email : "",
+        company: typeof parsed.company === "string" ? parsed.company : "",
+        name: typeof parsed.name === "string" ? parsed.name : "",
+        role: typeof parsed.role === "string" ? parsed.role : "",
+        teamProject: typeof parsed.teamProject === "string" ? parsed.teamProject : "",
+      };
+    } catch {
+      return emptyProfile;
+    }
+  });
   const [contributeToGlobal, setContributeToGlobal] = useState(true);
   const [isProfileSubmitted, setIsProfileSubmitted] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"backend" | "fallback" | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sessionId, setSessionId] = useState<string>(() => createId("orange-session"));
@@ -157,7 +186,7 @@ export default function TestChat() {
       const state = latestRef.current;
 
       if (!state.isProfileSubmitted || state.messages.length <= state.lastSavedCount) {
-        return false;
+        return null;
       }
 
       const payload = {
@@ -178,7 +207,7 @@ export default function TestChat() {
         if (sent) {
           setLastSavedCount(state.messages.length);
           window.dispatchEvent(new CustomEvent("orange-memory-graph-updated"));
-          return true;
+          return null;
         }
       }
 
@@ -193,9 +222,10 @@ export default function TestChat() {
         throw new Error("Completion request failed.");
       }
 
+      const completion = (await response.json().catch(() => ({}))) as CompletionResponse;
       setLastSavedCount(state.messages.length);
       window.dispatchEvent(new CustomEvent("orange-memory-graph-updated"));
-      return true;
+      return completion;
     },
     [],
   );
@@ -253,6 +283,7 @@ export default function TestChat() {
     setMessages(nextMessages);
     setDraft("");
     setIsSending(true);
+    setSaveStatus(null);
     setError(null);
 
     try {
@@ -293,6 +324,51 @@ export default function TestChat() {
       const assistantId = createId("assistant");
       let assistantContent = "";
       let memory: MemoryReference[] | undefined;
+      let animationFrame = 0;
+      const syncAssistantMessage = () => {
+        animationFrame = 0;
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantId
+              ? { ...message, content: assistantContent || " ", memory }
+              : message,
+          ),
+        );
+      };
+      const scheduleAssistantSync = () => {
+        if (animationFrame) {
+          return;
+        }
+        animationFrame = window.requestAnimationFrame(syncAssistantMessage);
+      };
+      const applyServerEventBlock = (block: string) => {
+        const parsed = parseServerEventBlock(block);
+        if (!parsed) {
+          return;
+        }
+
+        if (parsed.event === "memory") {
+          memory = parsed.data.memory_used ? parsed.data.matches : undefined;
+          scheduleAssistantSync();
+          return;
+        }
+
+        if (parsed.event === "delta" && parsed.data.text) {
+          assistantContent += parsed.data.text;
+          scheduleAssistantSync();
+          return;
+        }
+
+        if (parsed.event === "done") {
+          if (parsed.data.sessionId) {
+            setSessionId(parsed.data.sessionId);
+          }
+          if (!assistantContent) {
+            assistantContent = getAssistantText(parsed.data);
+          }
+          scheduleAssistantSync();
+        }
+      };
       setMessages((current) => [
         ...current,
         { id: assistantId, role: "assistant", content: "", memory },
@@ -313,45 +389,16 @@ export default function TestChat() {
         buffer = blocks.pop() ?? "";
 
         for (const block of blocks) {
-          const parsed = parseServerEventBlock(block);
-          if (!parsed) {
-            continue;
-          }
-
-          if (parsed.event === "memory") {
-            memory = parsed.data.memory_used ? parsed.data.matches : undefined;
-            setMessages((current) =>
-              current.map((message) =>
-                message.id === assistantId ? { ...message, memory } : message,
-              ),
-            );
-          }
-
-          if (parsed.event === "delta" && parsed.data.text) {
-            assistantContent += parsed.data.text;
-            setMessages((current) =>
-              current.map((message) =>
-                message.id === assistantId
-                  ? { ...message, content: assistantContent || " " }
-                  : message,
-              ),
-            );
-          }
-
-          if (parsed.event === "done") {
-            if (parsed.data.sessionId) {
-              setSessionId(parsed.data.sessionId);
-            }
-            if (!assistantContent) {
-              assistantContent = getAssistantText(parsed.data);
-              setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId ? { ...message, content: assistantContent, memory } : message,
-                ),
-              );
-            }
-          }
+          applyServerEventBlock(block);
         }
+      }
+
+      if (buffer.trim()) {
+        applyServerEventBlock(buffer);
+      }
+      if (animationFrame) {
+        window.cancelAnimationFrame(animationFrame);
+        syncAssistantMessage();
       }
     } catch (error) {
       setMessages(nextMessages);
@@ -370,7 +417,12 @@ export default function TestChat() {
     setError(null);
 
     try {
-      await completeConversation("user_done");
+      const completion = await completeConversation("user_done");
+      setSaveStatus(
+        completion?.source === "fallback" || completion?.persisted === false
+          ? "fallback"
+          : "backend",
+      );
     } catch {
       setError("Orange could not mark this conversation done. Your chat is still here.");
     } finally {
@@ -452,14 +504,35 @@ export default function TestChat() {
             {profile.email} · {profile.company}
           </h2>
         </div>
-        <button
-          type="button"
-          className="inline-flex h-10 items-center justify-center rounded-md border border-[#24352d]/20 px-4 text-sm font-bold text-[#24352d] transition hover:border-[#c5551c] hover:text-[#c5551c] disabled:cursor-not-allowed disabled:opacity-55"
-          disabled={!hasUnsavedMessages || isCompleting}
-          onClick={markDone}
-        >
-          {isCompleting ? "Saving..." : "Mark conversation done"}
-        </button>
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-[#24352d]/20 px-4 text-sm font-bold text-[#24352d] transition hover:border-[#c5551c] hover:text-[#c5551c] disabled:cursor-not-allowed disabled:opacity-55"
+            disabled={!hasUnsavedMessages || isCompleting || isSending}
+            onClick={markDone}
+          >
+            {isCompleting ? "Saving..." : "Mark conversation done"}
+          </button>
+          <p
+            className={`text-xs ${
+              saveStatus === "fallback"
+                ? "text-[#9f4218]"
+                : saveStatus === "backend"
+                  ? "text-[#2f6f5e]"
+                  : hasUnsavedMessages
+                    ? "text-[#5f746b]"
+                    : "text-transparent"
+            }`}
+          >
+            {saveStatus === "fallback"
+              ? "Saved in demo fallback only. Start the Orange backend for cross-app visibility."
+              : saveStatus === "backend"
+                ? "Saved to backend memory."
+                : hasUnsavedMessages
+                  ? "Unsaved changes in this conversation."
+                  : "."}
+          </p>
+        </div>
       </div>
 
       <div className="grid min-h-[520px] lg:grid-cols-[260px_minmax(0,1fr)]">

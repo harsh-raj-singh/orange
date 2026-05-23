@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from core.mcp_server.handlers import handle_recall_memory, handle_store_session
 from core.mcp_server.models import RecallMemoryRequest, StoreSessionRequest
-from core.viz_api.dependencies import get_chroma, get_neo4j
+from core.viz_api.dependencies import get_chroma, get_neo4j, get_postgres_store
 
 router = APIRouter()
 
@@ -121,7 +121,13 @@ async def complete_conversation(payload: DemoCompletePayload) -> JSONResponse:
         },
     )
     try:
-        response = await handle_store_session(req, neo4j=get_neo4j(), chroma=get_chroma(), llm=None)
+        response = await handle_store_session(
+            req,
+            neo4j=get_neo4j(),
+            chroma=get_chroma(),
+            llm=None,
+            postgres_store=get_postgres_store(),
+        )
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(status_code=502, content={"error": str(exc), "backend": "orange"})
 

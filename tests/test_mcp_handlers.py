@@ -372,6 +372,38 @@ def test_store_session_idempotent(monkeypatch: pytest.MonkeyPatch, mock_neo4j, m
     assert calls["count"] == 1
 
 
+def test_store_session_reprocesses_same_session_when_transcript_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_neo4j,
+    mock_chroma,
+) -> None:
+    calls = {"count": 0}
+
+    async def fake_run_extraction_pipeline(**kwargs) -> dict:
+        calls["count"] += 1
+        return {"problems_created": 0, "problems_merged": 0, "solutions_written": 0}
+
+    monkeypatch.setattr("core.mcp_server.handlers.run_extraction_pipeline", fake_run_extraction_pipeline)
+
+    first = StoreSessionRequest(
+        transcript="turn one",
+        source="cursor",
+        user_id="u1",
+        session_id="sess-xyz",
+    )
+    second = StoreSessionRequest(
+        transcript="turn one\nturn two",
+        source="cursor",
+        user_id="u1",
+        session_id="sess-xyz",
+    )
+
+    asyncio.run(handle_store_session(first, neo4j=mock_neo4j, chroma=mock_chroma, llm=None))
+    asyncio.run(handle_store_session(second, neo4j=mock_neo4j, chroma=mock_chroma, llm=None))
+
+    assert calls["count"] == 2
+
+
 def test_store_session_rejects_empty_transcript(mock_neo4j, mock_chroma) -> None:
     req = StoreSessionRequest(transcript="", source="cursor", user_id="u1", session_id="s1")
     with pytest.raises(ValueError, match="transcript"):

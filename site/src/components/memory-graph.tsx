@@ -44,6 +44,9 @@ type MemoryEdge = {
   strength?: number;
 };
 
+type NodePosition = Pick<MemoryNode, "x" | "y">;
+type GraphViewport = { scale: number; x: number; y: number };
+
 const memoryNodes: MemoryNode[] = [
   {
     id: "cors-insight",
@@ -385,6 +388,8 @@ export default function MemoryGraph() {
   const [selectedId, setSelectedId] = useState("cors-insight");
   const [scope, setScope] = useState<MemoryScopeFilter>("user");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [graphSource, setGraphSource] = useState<"backend" | "fallback">("fallback");
+  const [hasLoadedGraph, setHasLoadedGraph] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
   const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
@@ -420,8 +425,17 @@ export default function MemoryGraph() {
     }
   });
   const graphRef = useRef<HTMLDivElement>(null);
+  const graphLayerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
+  const viewportRef = useRef<GraphViewport>(viewport);
+  const nodePositionsRef = useRef<Record<string, NodePosition>>(
+    Object.fromEntries(visibleMemoryNodes.map((node) => [node.id, { x: node.x, y: node.y }])),
+  );
+  const nodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const edgeRefs = useRef<Record<string, SVGLineElement | null>>({});
+  const edgeLabelRefs = useRef<Record<string, SVGTextElement | null>>({});
+  const pointerCleanupRef = useRef<(() => void) | null>(null);
   const seenNodeIdsRef = useRef(new Set(visibleMemoryNodes.map((node) => node.id)));
 
   const selectedNode = useMemo(
@@ -430,6 +444,73 @@ export default function MemoryGraph() {
   );
   const selectedDate = formatDate(selectedNode?.metadata?.createdAt);
   const selectedScope = nodeScope(selectedNode);
+
+  const applyViewport = useCallback((nextViewport: GraphViewport) => {
+    const layer = graphLayerRef.current;
+    if (!layer) {
+      return;
+    }
+
+    layer.style.transform = `translate(${nextViewport.x}px, ${nextViewport.y}px) scale(${nextViewport.scale})`;
+  }, []);
+
+  const updateEdgePosition = useCallback((edge: MemoryEdge) => {
+    const start = nodePositionsRef.current[edge.source];
+    const end = nodePositionsRef.current[edge.target];
+    const line = edgeRefs.current[edge.id];
+
+    if (!start || !end || !line) {
+      return;
+    }
+
+    line.setAttribute("x1", `${start.x}%`);
+    line.setAttribute("y1", `${start.y}%`);
+    line.setAttribute("x2", `${end.x}%`);
+    line.setAttribute("y2", `${end.y}%`);
+
+    const label = edgeLabelRefs.current[edge.id];
+    if (label) {
+      label.setAttribute("x", `${(start.x + end.x) / 2}%`);
+      label.setAttribute("y", `${(start.y + end.y) / 2}%`);
+    }
+  }, []);
+
+  const updateConnectedEdges = useCallback(
+    (nodeId?: string) => {
+      for (const edge of edges) {
+        if (nodeId && edge.source !== nodeId && edge.target !== nodeId) {
+          continue;
+        }
+        updateEdgePosition(edge);
+      }
+    },
+    [edges, updateEdgePosition],
+  );
+
+  const applyNodePosition = useCallback((id: string, position: NodePosition) => {
+    const node = nodeRefs.current[id];
+    if (!node) {
+      return;
+    }
+
+    node.style.left = `${position.x}%`;
+    node.style.top = `${position.y}%`;
+  }, []);
+
+  useEffect(() => {
+    viewportRef.current = viewport;
+    applyViewport(viewport);
+  }, [applyViewport, viewport]);
+
+  useEffect(() => {
+    const nextPositions = Object.fromEntries(nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
+    nodePositionsRef.current = nextPositions;
+
+    for (const node of nodes) {
+      applyNodePosition(node.id, nextPositions[node.id]);
+    }
+    updateConnectedEdges();
+  }, [applyNodePosition, nodes, updateConnectedEdges]);
 
   useEffect(() => {
     function handleProfileUpdate() {
@@ -499,6 +580,8 @@ export default function MemoryGraph() {
       if (!isRecord(graph)) {
         return;
       }
+      setGraphSource(graph.source === "backend" ? "backend" : "fallback");
+      setHasLoadedGraph(true);
 
       setNodes((current) => {
         const existingById = new Map(current.map((node) => [node.id, node]));
@@ -517,7 +600,7 @@ export default function MemoryGraph() {
           window.setTimeout(() => setNewNodeIds(new Set()), 500);
         }
 
-        const resolvedNodes = nextNodes.length > 0 ? resolveOverlaps(nextNodes) : current;
+        const resolvedNodes = resolveOverlaps(nextNodes);
         if (!resolvedNodes.some((node) => node.id === selectedId)) {
           setSelectedId(resolvedNodes[0]?.id ?? "");
         }
@@ -546,7 +629,9 @@ export default function MemoryGraph() {
       void fetchGraph();
     };
     const interval = window.setInterval(() => {
-      void fetchGraph();
+      if (document.visibilityState === "visible") {
+        void fetchGraph();
+      }
     }, 6000);
 
     window.addEventListener("orange-memory-graph-updated", handleGraphUpdate);
@@ -591,6 +676,9 @@ export default function MemoryGraph() {
 
     try {
       const params = new URLSearchParams({ scope });
+      if (userEmail) {
+        params.set("user_email", userEmail);
+      }
       if (company) {
         params.set("company", company);
       }
@@ -616,26 +704,20 @@ export default function MemoryGraph() {
 
   function moveNode(clientX: number, clientY: number) {
     const drag = dragRef.current;
-    const bounds = graphRef.current?.getBoundingClientRect();
+    const bounds = graphLayerRef.current?.getBoundingClientRect();
 
     if (!drag || !bounds) {
       return;
     }
 
-    const x = ((clientX - bounds.left - drag.dx) / bounds.width) * 100;
-    const y = ((clientY - bounds.top - drag.dy) / bounds.height) * 100;
+    const nextPosition = {
+      x: clampPosition(((clientX - drag.dx - bounds.left) / bounds.width) * 100, 12, 88),
+      y: clampPosition(((clientY - drag.dy - bounds.top) / bounds.height) * 100, 14, 84),
+    };
 
-    setNodes((current) =>
-      current.map((node) =>
-        node.id === drag.id
-          ? {
-              ...node,
-              x: Math.min(88, Math.max(12, x)),
-              y: Math.min(84, Math.max(14, y)),
-            }
-          : node,
-      ),
-    );
+    nodePositionsRef.current[drag.id] = nextPosition;
+    applyNodePosition(drag.id, nextPosition);
+    updateConnectedEdges(drag.id);
   }
 
   function movePan(clientX: number, clientY: number) {
@@ -643,12 +725,64 @@ export default function MemoryGraph() {
     if (!pan) {
       return;
     }
-    setViewport((current) => ({
-      ...current,
+    const nextViewport = {
+      ...viewportRef.current,
       x: pan.x + clientX - pan.startX,
       y: pan.y + clientY - pan.startY,
-    }));
+    };
+    viewportRef.current = nextViewport;
+    applyViewport(nextViewport);
   }
+
+  function commitPointerInteraction() {
+    const drag = dragRef.current;
+    const pan = panRef.current;
+
+    if (drag) {
+      setNodes((current) =>
+        current.map((node) => {
+          const position = nodePositionsRef.current[node.id];
+          return position ? { ...node, ...position } : node;
+        }),
+      );
+    }
+
+    if (pan) {
+      setViewport(viewportRef.current);
+    }
+
+    dragRef.current = null;
+    panRef.current = null;
+  }
+
+  function stopWindowPointerTracking() {
+    pointerCleanupRef.current?.();
+    pointerCleanupRef.current = null;
+  }
+
+  function startWindowPointerTracking() {
+    stopWindowPointerTracking();
+
+    const handleMove = (event: PointerEvent) => {
+      moveNode(event.clientX, event.clientY);
+      movePan(event.clientX, event.clientY);
+    };
+    const handleEnd = () => {
+      stopWindowPointerTracking();
+      commitPointerInteraction();
+    };
+
+    window.addEventListener("pointermove", handleMove, { passive: true });
+    window.addEventListener("pointerup", handleEnd, { passive: true });
+    window.addEventListener("pointercancel", handleEnd, { passive: true });
+    pointerCleanupRef.current = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+  }
+
+  useEffect(() => () => stopWindowPointerTracking(), []);
 
   return (
     <div className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] ${introVisible ? "graph-in-view" : ""}`}>
@@ -688,26 +822,25 @@ export default function MemoryGraph() {
             return;
           }
           panRef.current = {
-            x: viewport.x,
-            y: viewport.y,
+            x: viewportRef.current.x,
+            y: viewportRef.current.y,
             startX: event.clientX,
             startY: event.clientY,
           };
-        }}
-        onPointerMove={(event) => {
-          moveNode(event.clientX, event.clientY);
-          movePan(event.clientX, event.clientY);
+          startWindowPointerTracking();
         }}
         onPointerUp={() => {
-          dragRef.current = null;
-          panRef.current = null;
+          stopWindowPointerTracking();
+          commitPointerInteraction();
         }}
         onPointerLeave={() => {
-          dragRef.current = null;
-          panRef.current = null;
+          if (!dragRef.current && !panRef.current) {
+            stopWindowPointerTracking();
+          }
         }}
       >
         <div
+          ref={graphLayerRef}
           className="absolute inset-0"
           style={{
             transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
@@ -726,6 +859,9 @@ export default function MemoryGraph() {
               return (
                 <g className="group" key={edge.id}>
                   <line
+                    ref={(element) => {
+                      edgeRefs.current[edge.id] = element;
+                    }}
                     className="graph-edge"
                     x1={`${start.x}%`}
                     y1={`${start.y}%`}
@@ -738,6 +874,9 @@ export default function MemoryGraph() {
                   />
                   {edge.label ? (
                     <text
+                      ref={(element) => {
+                        edgeLabelRefs.current[edge.id] = element;
+                      }}
                       x={`${(start.x + end.x) / 2}%`}
                       y={`${(start.y + end.y) / 2}%`}
                       className="opacity-0 transition-opacity group-hover:opacity-100"
@@ -755,14 +894,29 @@ export default function MemoryGraph() {
             })}
           </svg>
 
-        <div className="absolute left-5 top-5 rounded-md border border-[#24352d]/10 bg-white/88 px-3 py-2 shadow-sm backdrop-blur">
-          <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#c5551c]">
-            Live neighborhood
-          </p>
-          <p className="mt-1 text-xs text-[#536057]">
-            {nodes.length} nodes {isRefreshing ? "syncing" : "linked"}
-          </p>
-        </div>
+          {hasLoadedGraph && nodes.length === 0 ? (
+            <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+              <div className="max-w-sm rounded-lg border border-dashed border-[#9aa79d] bg-white/92 px-5 py-4 text-sm leading-6 text-[#536057] shadow-sm">
+                No notes are visible in this scope yet. Complete a conversation with matching profile details to create private or shared memory here.
+              </div>
+            </div>
+          ) : null}
+
+          <div className="absolute left-5 top-5 rounded-md border border-[#24352d]/10 bg-white/88 px-3 py-2 shadow-sm backdrop-blur">
+            <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#c5551c]">
+              Live neighborhood
+            </p>
+            <p className="mt-1 text-xs text-[#536057]">
+              {nodes.length} nodes {isRefreshing ? "syncing" : "linked"}
+            </p>
+            <p
+              className={`mt-1 font-mono text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${
+                graphSource === "backend" ? "text-[#2f6f5e]" : "text-[#9f4218]"
+              }`}
+            >
+              {graphSource === "backend" ? "backend sync" : "demo fallback"}
+            </p>
+          </div>
 
           {nodes.map((node, index) => {
             const isSelected = node.id === selectedNode?.id;
@@ -772,6 +926,10 @@ export default function MemoryGraph() {
             return (
               <button
                 key={node.id}
+                id={`node-${node.id}`}
+                ref={(element) => {
+                  nodeRefs.current[node.id] = element;
+                }}
                 type="button"
                 className={`memory-node absolute w-[9.75rem] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-3 py-3 text-left transition-[opacity,transform,box-shadow] duration-500 active:cursor-grabbing ${kindClass[node.kind]} ${scopeNodeClass[currentScope]} ${
                   isSelected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-[calc(50%+2px)]"
@@ -782,19 +940,26 @@ export default function MemoryGraph() {
                 }}
                 onPointerDown={(event) => {
                   event.stopPropagation();
-                  const bounds = graphRef.current?.getBoundingClientRect();
-
-                  if (!bounds) {
-                    return;
-                  }
-
+                  const nodeBounds = event.currentTarget.getBoundingClientRect();
                   event.currentTarget.setPointerCapture(event.pointerId);
                   setSelectedId(node.id);
+                  nodePositionsRef.current[node.id] = { x: node.x, y: node.y };
                   dragRef.current = {
                     id: node.id,
-                    dx: event.clientX - (bounds.left + (node.x / 100) * bounds.width),
-                    dy: event.clientY - (bounds.top + (node.y / 100) * bounds.height),
+                    dx: event.clientX - (nodeBounds.left + nodeBounds.width / 2),
+                    dy: event.clientY - (nodeBounds.top + nodeBounds.height / 2),
                   };
+                  startWindowPointerTracking();
+                }}
+                onPointerUp={(event) => {
+                  event.stopPropagation();
+                  stopWindowPointerTracking();
+                  commitPointerInteraction();
+                }}
+                onPointerCancel={(event) => {
+                  event.stopPropagation();
+                  stopWindowPointerTracking();
+                  commitPointerInteraction();
                 }}
               >
                 <span className="memory-node-pulse" aria-hidden="true" />

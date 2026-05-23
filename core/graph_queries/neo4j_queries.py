@@ -149,6 +149,73 @@ def _without_raw_description(graph: dict[str, list[dict[str, Any]]]) -> dict[str
     return graph
 
 
+def _matches_scope(
+    node: dict[str, Any],
+    *,
+    user_id: str | None = None,
+    user_email: str | None = None,
+    org_id: str | None = None,
+    scope: str = "both",
+) -> bool:
+    properties = node.get("properties") if isinstance(node, dict) else None
+    if not isinstance(properties, dict):
+        return False
+
+    requested_scope = scope if scope in {"user", "global", "both"} else "both"
+    node_scope = str(properties.get("scope") or "").strip().lower()
+    normalized_user_email = (user_email or "").strip().lower()
+    normalized_user_id = (user_id or "").strip()
+    normalized_org_id = (org_id or "").strip().lower()
+
+    user_matches = False
+    if normalized_user_email or normalized_user_id:
+        user_matches = node_scope in {"", "user"} and (
+            properties.get("user_email") == normalized_user_email
+            or properties.get("user_id") == normalized_user_email
+            or properties.get("user_id") == normalized_user_id
+        )
+
+    global_matches = (
+        bool(normalized_org_id)
+        and node_scope == "global"
+        and str(properties.get("org_id") or "").strip().lower() == normalized_org_id
+    )
+
+    if requested_scope == "user":
+        return user_matches
+    if requested_scope == "global":
+        return global_matches
+    return user_matches or global_matches
+
+
+def filter_graph_by_scope(
+    graph: dict[str, list[dict[str, Any]]],
+    *,
+    user_id: str | None = None,
+    user_email: str | None = None,
+    org_id: str | None = None,
+    scope: str = "both",
+) -> dict[str, list[dict[str, Any]]]:
+    visible_nodes = [
+        node
+        for node in graph.get("nodes", [])
+        if _matches_scope(
+            node,
+            user_id=user_id,
+            user_email=user_email,
+            org_id=org_id,
+            scope=scope,
+        )
+    ]
+    visible_ids = {str(node.get("id") or "") for node in visible_nodes}
+    visible_edges = [
+        edge
+        for edge in graph.get("edges", [])
+        if str(edge.get("source") or "") in visible_ids and str(edge.get("target") or "") in visible_ids
+    ]
+    return {"nodes": visible_nodes, "edges": visible_edges}
+
+
 def _neo4j_record_to_node(node) -> dict:
     """Convert a neo4j Node object to serializable dict."""
     return {

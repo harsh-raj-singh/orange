@@ -9,6 +9,8 @@ load_dotenv()
 
 _NEO4J_CLIENT: Any | None = None
 _CHROMA_CLIENT: Any | None = None
+_POSTGRES_STORE: Any | None = None
+_POSTGRES_DISABLED = False
 _NEO4J_CONSTRAINTS_READY = False
 
 
@@ -79,3 +81,25 @@ def get_chroma() -> Any:
     chroma_path = os.getenv("CHROMA_PATH", default_path)
     _CHROMA_CLIENT = chromadb.PersistentClient(path=chroma_path)
     return _CHROMA_CLIENT
+
+
+def get_postgres_store() -> Any | None:
+    global _POSTGRES_STORE, _POSTGRES_DISABLED
+    if _POSTGRES_STORE is not None:
+        return _POSTGRES_STORE
+    if _POSTGRES_DISABLED:
+        return None
+
+    dsn = os.getenv("SUPABASE_DB_URL") or os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+    if not dsn:
+        _POSTGRES_DISABLED = True
+        return None
+
+    try:
+        from core.storage import OrangePostgresStore
+
+        _POSTGRES_STORE = OrangePostgresStore(dsn)
+    except Exception:
+        _POSTGRES_DISABLED = True
+        return None
+    return _POSTGRES_STORE

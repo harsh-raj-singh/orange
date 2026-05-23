@@ -37,13 +37,26 @@ export default function SiteMotion() {
       document.documentElement.toggleAttribute("data-scrolled", window.scrollY > 50);
     };
 
+    let pointerRaf = 0;
+    let pointerX = 0;
+    let pointerY = 0;
+
+    const flushPointer = () => {
+      document.documentElement.style.setProperty("--cursor-x", `${pointerX}px`);
+      document.documentElement.style.setProperty("--cursor-y", `${pointerY}px`);
+      pointerRaf = 0;
+    };
+
     const handlePointerMove = (event: PointerEvent) => {
-      document.documentElement.style.setProperty("--cursor-x", `${event.clientX}px`);
-      document.documentElement.style.setProperty("--cursor-y", `${event.clientY}px`);
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      if (pointerRaf) {
+        return;
+      }
+      pointerRaf = window.requestAnimationFrame(flushPointer);
     };
 
     handleScroll();
-    const scrollPoll = window.setInterval(handleScroll, 150);
     window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
 
@@ -359,7 +372,9 @@ export default function SiteMotion() {
 
       return () => {
         window.clearTimeout(refreshTimer);
-        window.clearInterval(scrollPoll);
+        if (pointerRaf) {
+          window.cancelAnimationFrame(pointerRaf);
+        }
         if (torchRaf) {
           window.cancelAnimationFrame(torchRaf);
         }
@@ -377,12 +392,14 @@ export default function SiteMotion() {
     return () => {
       window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("pointermove", handlePointerMove);
+      if (pointerRaf) {
+        window.cancelAnimationFrame(pointerRaf);
+      }
       if (torchRaf) {
         window.cancelAnimationFrame(torchRaf);
       }
       hero?.removeEventListener("mousemove", handleHeroMouseMove);
       hero?.removeEventListener("mouseleave", closeTorch);
-      window.clearInterval(scrollPoll);
       gsap.ticker.remove(updateLenis);
       lenis?.destroy();
     };

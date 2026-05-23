@@ -14,6 +14,7 @@ load_dotenv(override=True)
 _CLIENT: AsyncOpenAI | None = None
 _CLIENT_SETTINGS: tuple[str, str | None] | None = None
 MAX_RETRIES = 3
+_INVALID_JSON_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])')
 
 
 def _get_client(api_key: str, base_url: str | None) -> AsyncOpenAI:
@@ -56,6 +57,40 @@ def _strip_code_fences(text: str) -> str:
     return cleaned.strip()
 
 
+def _repair_invalid_json_escapes(text: str) -> str:
+    """Remove model-added escapes that JSON does not allow, such as \\`."""
+    return _INVALID_JSON_ESCAPE_RE.sub("", text)
+
+
+def _json_candidates(raw_text: str) -> list[str]:
+    cleaned = _strip_code_fences(raw_text)
+    candidates = [cleaned]
+    match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+    if match and match.group(0) != cleaned:
+        candidates.append(match.group(0))
+    return candidates
+
+
+def _parse_llm_json(raw_text: str) -> Any:
+    last_exc: json.JSONDecodeError | None = None
+    seen: set[str] = set()
+    for candidate in _json_candidates(raw_text):
+        for variant in (candidate, _repair_invalid_json_escapes(candidate)):
+            if variant in seen:
+                continue
+            seen.add(variant)
+            try:
+                parsed = json.loads(variant)
+            except json.JSONDecodeError as exc:
+                last_exc = exc
+                continue
+            return parsed
+
+    if last_exc is not None:
+        raise last_exc
+    raise ValueError("LLM response did not contain a JSON object.")
+
+
 def _resolve_llm_config() -> tuple[str, str, str | None]:
     api_key = (os.getenv("OPENAI_API_KEY") or os.getenv("NVIDIA_API_KEY") or "").strip()
     if not api_key:
@@ -76,7 +111,7 @@ def _resolve_llm_config() -> tuple[str, str, str | None]:
     return api_key, model, base_url.strip() if isinstance(base_url, str) and base_url.strip() else None
 
 
-async def call_llm_json(system_prompt: str, user_content: str) -> dict:
+async def call_llm_json(system_prompt: str, user_content: str) -> Any:
     scope_prompt = active_extraction_prompt()
     if scope_prompt:
         system_prompt = f"{system_prompt}\n\n{scope_prompt}"
@@ -113,7 +148,7 @@ async def call_llm_json(system_prompt: str, user_content: str) -> dict:
 
             raw_text = _content_to_text(response.choices[0].message.content)
             cleaned = _strip_code_fences(raw_text)
-            result = json.loads(cleaned)
+            result = _parse_llm_json(raw_text)
             print(
                 f"[LLM] attempt={attempt} parsed ok total_wall={time.time()-t0:.1f}s",
                 flush=True,
@@ -124,7 +159,9 @@ async def call_llm_json(system_prompt: str, user_content: str) -> dict:
                 f"[LLM] attempt={attempt} JSON PARSE ERROR after {time.time()-t0:.1f}s",
                 flush=True,
             )
-            raise ValueError(f"LLM returned invalid JSON on attempt {attempt}.\nRaw:\n{cleaned}") from exc
+            last_exc = ValueError(f"LLM returned invalid JSON on attempt {attempt}.\nRaw:\n{cleaned}")
+            if attempt == MAX_RETRIES:
+                break
         except Exception as exc:  # noqa: BLE001
             print(f"[LLM] attempt={attempt} ERROR after {time.time()-t0:.1f}s: {exc}", flush=True)
             last_exc = exc

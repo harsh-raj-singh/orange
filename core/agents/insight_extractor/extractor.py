@@ -44,6 +44,11 @@ def _tags_from(transcript: str) -> list[str]:
         "md-files",
         "company-memory",
         "aws-glue",
+        "gtm",
+        "launch-strategy",
+        "marketing",
+        "growth",
+        "barcelona",
     ]
     lowered = transcript.lower()
     return [tag for tag in candidates if tag in lowered][:6]
@@ -57,12 +62,46 @@ def _fallback_insights(transcript: str, *, scope: str = "user", company: str | N
     if scope == "global" and not (company or "").strip():
         return []
     if scope == "global" and not any(
-        token in lowered for token in ("our company", "our companies", "company uses", "we use", "aws glue", "glue issue")
+        token in lowered
+        for token in (
+            "our company",
+            "our companies",
+            "company uses",
+            "we use",
+            "aws glue",
+            "glue issue",
+            "go-to-market",
+            "gtm",
+            "soft launch",
+            "paid ads",
+            "inbound",
+            "investor",
+            "series a",
+            "pricing",
+        )
     ):
         return []
 
     memory_kind = "technical_insight"
-    if any(token in lowered for token in ("our company", "our companies", "company uses", "we use", "we store", "memory source")):
+    if any(
+        token in lowered
+        for token in (
+            "our company",
+            "our companies",
+            "company uses",
+            "we use",
+            "we store",
+            "memory source",
+            "go-to-market",
+            "gtm",
+            "soft launch",
+            "paid ads",
+            "inbound",
+            "investor",
+            "series a",
+            "pricing",
+        )
+    ):
         memory_kind = "company_fact"
     if scope == "user" and any(token in lowered for token in ("prefer", "make it", "should feel", "only use", "required field")):
         memory_kind = "steering"

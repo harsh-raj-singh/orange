@@ -41,11 +41,11 @@ If nothing worth storing, return []."""
 
 GLOBAL_INSIGHT_EXTRACTOR_SYSTEM_PROMPT = """You extract company-scoped shared facts from developer conversations.
 This is NOT personal memory. It is a graph for coworkers inside the same company only.
-The transcript may be PII-scrubbed. Extract only durable company/org facts grounded in USER messages.
+The transcript may be PII-scrubbed. Extract only durable company/org facts and decisions grounded in USER messages.
 
 Return a minimal JSON array. Each item:
 {
-"what": "company/org fact, incident, internal workflow, or technical cause — 1-2 sentences max",
+"what": "company/org fact, decision, incident, internal workflow, or technical cause — 1-2 sentences max",
 "why": "reason/root cause if known — null if not discovered",
 "how": "workflow, mitigation, or action if known — null if nothing concrete",
 "outcome": one of: "resolved" | "exploratory" | "partial" | "abandoned",
@@ -59,6 +59,8 @@ Store examples:
 - Company uses Markdown files as the source format for memory
 - AWS Glue issue caused a pipeline failure
 - Company deploys Glue jobs through Terraform
+- Spain GTM should soft launch in Q3 with inbound-first acquisition
+- Investors approved a 60-day extension for the current fundraising timeline
 
 Do not store:
 - personal preferences or user identity facts
