@@ -109,7 +109,7 @@ function buildOpenAIRequestBody(
   memoryContext?: string,
 ) {
   const model = process.env.OPENAI_CHAT_MODEL ?? body.model ?? DEFAULT_OPENAI_MODEL;
-  const tokenLimit = body.max_tokens ?? 512;
+  const tokenLimit = body.max_tokens ?? 1024;
   const requestBody: Record<string, unknown> = {
     model,
     messages: [
