@@ -437,6 +437,8 @@ export default function MemoryGraph() {
   const edgeLabelRefs = useRef<Record<string, SVGTextElement | null>>({});
   const pointerCleanupRef = useRef<(() => void) | null>(null);
   const seenNodeIdsRef = useRef(new Set(visibleMemoryNodes.map((node) => node.id)));
+  const isGraphVisibleRef = useRef(false);
+  const hasRevealedGraphRef = useRef(false);
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedId) ?? nodes[0],
@@ -629,7 +631,7 @@ export default function MemoryGraph() {
       void fetchGraph();
     };
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === "visible" && isGraphVisibleRef.current) {
         void fetchGraph();
       }
     }, 6000);
@@ -652,9 +654,11 @@ export default function MemoryGraph() {
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
+        isGraphVisibleRef.current = entry.isIntersecting;
+
+        if (entry.isIntersecting && !hasRevealedGraphRef.current) {
+          hasRevealedGraphRef.current = true;
           setIntroVisible(true);
-          observer.disconnect();
         }
       },
       { threshold: 0.32 },
@@ -662,7 +666,10 @@ export default function MemoryGraph() {
 
     observer.observe(graph);
 
-    return () => observer.disconnect();
+    return () => {
+      isGraphVisibleRef.current = false;
+      observer.disconnect();
+    };
   }, []);
 
   async function selectNode(node: MemoryNode) {

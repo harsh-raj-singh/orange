@@ -127,7 +127,7 @@
   </head>
   <body>
     <main>
-      <span class="pill">Last updated: 2026-05-23</span>
+      <span class="pill">Last updated: 2026-05-24</span>
       <h1>Implementation Notes</h1>
       <p class="intro">
         This file is the plain-English log of what changed, what is intentionally different from the original behavior,
@@ -143,6 +143,10 @@
             <li>Private notes are filtered by user email. Shared notes are filtered by company/org, so cross-app visibility works without widening private memory.</li>
             <li>The UI now makes backend-vs-fallback status visible, which makes persistence problems easier to spot.</li>
             <li>Graph dragging now keeps hot-path node positions in refs and writes DOM positions directly, then commits to React state only when the drag ends.</li>
+            <li>Lenis now owns scroll-derived UI updates when smooth scrolling is active. The native window scroll listener is only used when reduced-motion mode disables Lenis.</li>
+            <li>The memory graph does not have a requestAnimationFrame simulation loop. Its periodic backend refresh now pauses while the graph section is off-screen.</li>
+            <li>The hero image is still preloaded, and now has explicit responsive sizes plus an allowed image quality so Next.js can choose a better source size without runtime warnings.</li>
+            <li>GSAP animations now skip missing optional targets instead of logging noisy runtime warnings.</li>
             <li>The LLM JSON parser now tolerates common model formatting mistakes, including fenced JSON and invalid escaped backticks, without breaking the extraction pipeline.</li>
           </ul>
         </section>
@@ -156,6 +160,7 @@
             <li>I kept the simple synchronous completion path for now so behavior stays deterministic while we fix correctness.</li>
             <li>I kept LLM parser recovery narrow: it repairs invalid escape characters but does not try to guess missing keys or rewrite malformed business content.</li>
             <li>Node drag updates use <code>left/top</code> because this graph already uses CSS transforms for centering, hover, and entry animation. This keeps the same visual behavior while avoiding per-pixel React renders.</li>
+            <li>I used Lenis' own <code>scroll</code> event for scroll-aware effects instead of mixing Lenis with a native window scroll listener.</li>
           </ul>
         </section>
 
@@ -175,6 +180,7 @@
             <li>Fail-closed graph reads are safer, but they require the Vercel profile and Slack company/email identity to match.</li>
             <li>Background processing would reduce perceived latency, but it is a bigger architecture change. I left that as a next step rather than mixing it into this fix pass.</li>
             <li>During drag, SVG edge lines and labels are also updated through refs. This avoids recalculating and re-rendering every edge on every pointer event.</li>
+            <li>Graph refresh still runs once on load so the section is ready when someone scrolls to it, but repeat polling waits until the graph is actually visible.</li>
           </ul>
         </section>
 

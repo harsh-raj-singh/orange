@@ -27,14 +27,17 @@ export default function SiteMotion() {
       lenis?.raf(time * 1000);
     };
 
-    if (lenis) {
-      lenis.on("scroll", ScrollTrigger.update);
-      gsap.ticker.add(updateLenis);
-      gsap.ticker.lagSmoothing(0);
-    }
+    const updateScrolledState = (scroll: number) => {
+      document.documentElement.toggleAttribute("data-scrolled", scroll > 50);
+    };
 
-    const handleScroll = () => {
-      document.documentElement.toggleAttribute("data-scrolled", window.scrollY > 50);
+    const handleNativeScroll = () => {
+      updateScrolledState(window.scrollY);
+    };
+
+    const handleLenisScroll = ({ scroll }: { scroll: number; progress: number }) => {
+      updateScrolledState(scroll);
+      ScrollTrigger.update();
     };
 
     let pointerRaf = 0;
@@ -56,8 +59,14 @@ export default function SiteMotion() {
       pointerRaf = window.requestAnimationFrame(flushPointer);
     };
 
-    handleScroll();
-    window.addEventListener("scroll", handleScroll, { passive: true });
+    handleNativeScroll();
+    if (lenis) {
+      lenis.on("scroll", handleLenisScroll);
+      gsap.ticker.add(updateLenis);
+      gsap.ticker.lagSmoothing(0);
+    } else {
+      window.addEventListener("scroll", handleNativeScroll, { passive: true });
+    }
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
 
     const hero = document.querySelector<HTMLElement>(".hero-section");
@@ -171,25 +180,31 @@ export default function SiteMotion() {
           }
         }
 
-        gsap.fromTo(
-          "[data-hero-word]",
-          { yPercent: 120, opacity: 0, rotateX: -18 },
-          {
-            yPercent: 0,
-            opacity: 1,
-            rotateX: 0,
-            duration: 0.85,
-            ease: "power3.out",
-            stagger: 0.075,
-            delay: 0.1,
-          },
-        );
+        const heroWords = gsap.utils.toArray<HTMLElement>("[data-hero-word]");
+        if (heroWords.length > 0) {
+          gsap.fromTo(
+            heroWords,
+            { yPercent: 120, opacity: 0, rotateX: -18 },
+            {
+              yPercent: 0,
+              opacity: 1,
+              rotateX: 0,
+              duration: 0.85,
+              ease: "power3.out",
+              stagger: 0.075,
+              delay: 0.1,
+            },
+          );
+        }
 
-        gsap.fromTo(
-          "[data-ping-card]",
-          { y: 34, opacity: 0, scale: 0.96 },
-          { y: 0, opacity: 1, scale: 1, duration: 0.9, ease: "power3.out", delay: 0.38 },
-        );
+        const pingCards = gsap.utils.toArray<HTMLElement>("[data-ping-card]");
+        if (pingCards.length > 0) {
+          gsap.fromTo(
+            pingCards,
+            { y: 34, opacity: 0, scale: 0.96 },
+            { y: 0, opacity: 1, scale: 1, duration: 0.9, ease: "power3.out", delay: 0.38 },
+          );
+        }
 
         const score = document.querySelector<HTMLElement>("[data-score-target]");
         if (score) {
@@ -207,27 +222,36 @@ export default function SiteMotion() {
           });
         }
 
-        gsap.fromTo(
-          "[data-ping-line]",
-          { y: 14, opacity: 0 },
-          { y: 0, opacity: 1, duration: 0.42, ease: "power2.out", stagger: 0.08, delay: 0.78 },
-        );
+        const pingLines = gsap.utils.toArray<HTMLElement>("[data-ping-line]");
+        if (pingLines.length > 0) {
+          gsap.fromTo(
+            pingLines,
+            { y: 14, opacity: 0 },
+            { y: 0, opacity: 1, duration: 0.42, ease: "power2.out", stagger: 0.08, delay: 0.78 },
+          );
+        }
 
-        gsap.fromTo(
-          "[data-hero-metric]",
-          { y: 22, opacity: 0 },
-          { y: 0, opacity: 1, duration: 0.6, ease: "power2.out", stagger: 0.08, delay: 1.0 },
-        );
+        const heroMetrics = gsap.utils.toArray<HTMLElement>("[data-hero-metric]");
+        if (heroMetrics.length > 0) {
+          gsap.fromTo(
+            heroMetrics,
+            { y: 22, opacity: 0 },
+            { y: 0, opacity: 1, duration: 0.6, ease: "power2.out", stagger: 0.08, delay: 1.0 },
+          );
+        }
 
-        gsap.to("[data-hero-glow]", {
-          x: 42,
-          y: -28,
-          scale: 1.08,
-          duration: 7,
-          repeat: -1,
-          yoyo: true,
-          ease: "sine.inOut",
-        });
+        const heroGlow = document.querySelector<HTMLElement>("[data-hero-glow]");
+        if (heroGlow) {
+          gsap.to(heroGlow, {
+            x: 42,
+            y: -28,
+            scale: 1.08,
+            duration: 7,
+            repeat: -1,
+            yoyo: true,
+            ease: "sine.inOut",
+          });
+        }
 
         gsap.utils.toArray<HTMLElement>("[data-line-reveal]").forEach((line) => {
           gsap.fromTo(
@@ -263,22 +287,25 @@ export default function SiteMotion() {
           );
         });
 
-        gsap.fromTo(
-          "[data-bento-card]",
-          { y: 30, opacity: 0, scale: 0.98 },
-          {
-            y: 0,
-            opacity: 1,
-            scale: 1,
-            duration: 0.72,
-            ease: "power3.out",
-            stagger: 0.15,
-            scrollTrigger: {
-              trigger: "[data-bento-grid]",
-              start: "top 78%",
+        const bentoCards = gsap.utils.toArray<HTMLElement>("[data-bento-card]");
+        if (bentoCards.length > 0) {
+          gsap.fromTo(
+            bentoCards,
+            { y: 30, opacity: 0, scale: 0.98 },
+            {
+              y: 0,
+              opacity: 1,
+              scale: 1,
+              duration: 0.72,
+              ease: "power3.out",
+              stagger: 0.15,
+              scrollTrigger: {
+                trigger: "[data-bento-grid]",
+                start: "top 78%",
+              },
             },
-          },
-        );
+          );
+        }
 
         gsap.utils.toArray<HTMLElement>("[data-count-to]").forEach((counter) => {
           const target = Number(counter.dataset.countTo ?? "0");
@@ -382,7 +409,8 @@ export default function SiteMotion() {
         hero?.removeEventListener("mouseleave", closeTorch);
         media?.revert();
         ctx.revert();
-        window.removeEventListener("scroll", handleScroll);
+        lenis?.off("scroll", handleLenisScroll);
+        window.removeEventListener("scroll", handleNativeScroll);
         window.removeEventListener("pointermove", handlePointerMove);
         gsap.ticker.remove(updateLenis);
         lenis?.destroy();
@@ -390,7 +418,8 @@ export default function SiteMotion() {
     }
 
     return () => {
-      window.removeEventListener("scroll", handleScroll);
+      lenis?.off("scroll", handleLenisScroll);
+      window.removeEventListener("scroll", handleNativeScroll);
       window.removeEventListener("pointermove", handlePointerMove);
       if (pointerRaf) {
         window.cancelAnimationFrame(pointerRaf);
