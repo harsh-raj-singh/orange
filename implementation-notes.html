@@ -152,6 +152,7 @@
             <li>LLM retries now wait briefly before retrying, so rate limits are not retried three times in the same instant.</li>
             <li>Chroma collection handles are cached instead of being looked up or created repeatedly during every graph write.</li>
             <li>Neo4j graph writes from completed-session extraction now run in a worker thread, so synchronous driver calls do not block the FastAPI event loop.</li>
+            <li>The demo chat API now defaults to 1024 response tokens instead of 512, so memory-rich debugging answers are less likely to cut off mid-explanation.</li>
             <li>The LLM JSON parser now tolerates common model formatting mistakes, including fenced JSON and invalid escaped backticks, without breaking the extraction pipeline.</li>
           </ul>
         </section>
@@ -168,6 +169,7 @@
             <li>I used Lenis' own <code>scroll</code> event for scroll-aware effects instead of mixing Lenis with a native window scroll listener.</li>
             <li>I kept the Neo4j sync driver for now but moved completed-session writes off the event loop with <code>asyncio.to_thread</code>. A full async-driver migration is cleaner, but larger and riskier.</li>
             <li>I cached LLM config after the first successful lookup instead of failing at module import, because tests and local scripts import parser helpers without production API keys.</li>
+            <li>I only changed the default chat token limit. If a caller passes <code>max_tokens</code>, that explicit value still wins.</li>
           </ul>
         </section>
 
