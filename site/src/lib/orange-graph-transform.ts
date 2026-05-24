@@ -120,6 +120,16 @@ function asStringArray(value: unknown) {
   return undefined;
 }
 
+function memoryKindFor(value: unknown) {
+  return value === "technical_insight" ||
+    value === "user_fact" ||
+    value === "company_fact" ||
+    value === "preference" ||
+    value === "steering"
+    ? value
+    : undefined;
+}
+
 function scopeFor(properties: Record<string, unknown>, fallback: MemoryScope) {
   const rawScope =
     asString(properties.scope) ??
@@ -188,6 +198,7 @@ export function transformBackendGraph(graph: BackendGraph, requestedScope: Memor
               ? outcome
               : undefined,
           tags,
+          memoryKind: memoryKindFor(properties.memory_kind),
           scope,
         } as DemoMemoryNode["metadata"] & { scope: Exclude<MemoryScope, "both"> },
         detail: rawDescription

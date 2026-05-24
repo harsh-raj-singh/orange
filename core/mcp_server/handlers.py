@@ -471,6 +471,11 @@ async def handle_store_session(
         metadata["problems_solved"] = _clean_string_list(req.problems_solved)
     if req.worth_storing is not None:
         metadata["worth_storing"] = bool(req.worth_storing)
+    scope_override = (req.scope or "").strip().lower() or None
+    if scope_override and scope_override not in {"user", "global", "both"}:
+        raise ValueError("scope must be one of: user, global, both")
+    if scope_override:
+        metadata["scope_override"] = scope_override
     if req.session_duration_turns:
         metadata["session_duration_turns"] = int(req.session_duration_turns)
     company = (req.company or metadata.get("company") or "").strip() if isinstance(req.company or metadata.get("company"), str) else ""
@@ -533,6 +538,7 @@ async def handle_store_session(
             contribute_to_global=req.contribute_to_global,
             pii_llm=llm,
             force_worth_storing=req.worth_storing is True,
+            scope_override=scope_override,
         )
     except Exception:
         if (

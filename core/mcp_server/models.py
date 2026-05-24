@@ -60,6 +60,7 @@ class StoreSessionRequest:
     decisions: list[str] = field(default_factory=list)
     problems_solved: list[str] = field(default_factory=list)
     worth_storing: bool | None = None
+    scope: str | None = None
     session_duration_turns: int = 0
 
 

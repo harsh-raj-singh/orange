@@ -78,10 +78,8 @@ def test_pipeline_writes_unified_insight(monkeypatch, mock_neo4j, mock_chroma) -
 
 
 def test_user_and_company_pipelines_are_independent(monkeypatch, mock_neo4j, mock_chroma) -> None:
-    async def fake_triage(_transcript: str, **kwargs) -> TriageDecision:
-        if kwargs.get("scope") == "global":
-            return TriageDecision(worth_storing=True, reason="company fact")
-        return TriageDecision(worth_storing=True, reason="user steering")
+    async def fake_triage(_transcript: str, **_kwargs) -> TriageDecision:
+        return TriageDecision(should_store=True, suggested_scope="both", confidence=0.92, reason="company fact and user steering")
 
     async def fake_extract(_transcript: str, **kwargs) -> list[InsightDraft]:
         if kwargs.get("scope") == "global":
@@ -146,29 +144,32 @@ def test_user_and_company_pipelines_are_independent(monkeypatch, mock_neo4j, moc
     assert any(metadata["memory_kind"] == "company_fact" and metadata["scope"] == "global" for metadata in metadatas)
 
 
-def test_user_and_company_pipelines_run_concurrently(monkeypatch, mock_neo4j, mock_chroma) -> None:
-    active_triage_calls = 0
-    max_active_triage_calls = 0
-    triage_scopes: list[str] = []
+def test_user_and_company_extractors_run_concurrently_after_single_triage(monkeypatch, mock_neo4j, mock_chroma) -> None:
+    triage_calls = 0
+    active_extract_calls = 0
+    max_active_extract_calls = 0
+    extract_scopes: list[str] = []
 
     async def fake_scrub(transcript: str, **_kwargs) -> str:
         return transcript
 
-    async def fake_triage(_transcript: str, **kwargs) -> TriageDecision:
-        nonlocal active_triage_calls, max_active_triage_calls
-        triage_scopes.append(str(kwargs.get("scope")))
-        active_triage_calls += 1
-        max_active_triage_calls = max(max_active_triage_calls, active_triage_calls)
-        await asyncio.sleep(0.01)
-        active_triage_calls -= 1
-        return TriageDecision(worth_storing=False, reason=f"{kwargs.get('scope')} skipped")
+    async def fake_triage(_transcript: str, **_kwargs) -> TriageDecision:
+        nonlocal triage_calls
+        triage_calls += 1
+        return TriageDecision(should_store=True, suggested_scope="both", confidence=0.9, reason="store both scopes")
 
-    async def fail_extract(_transcript: str, **_kwargs) -> list[InsightDraft]:
-        raise AssertionError("extractor should not run when triage skips")
+    async def fake_extract(_transcript: str, **kwargs) -> list[InsightDraft]:
+        nonlocal active_extract_calls, max_active_extract_calls
+        extract_scopes.append(str(kwargs.get("scope")))
+        active_extract_calls += 1
+        max_active_extract_calls = max(max_active_extract_calls, active_extract_calls)
+        await asyncio.sleep(0.01)
+        active_extract_calls -= 1
+        return []
 
     monkeypatch.setattr("core.agents.orchestrator.scrub_pii_transcript", fake_scrub)
     monkeypatch.setattr("core.agents.orchestrator.run_triage_agent", fake_triage)
-    monkeypatch.setattr("core.agents.orchestrator.extract_insights", fail_extract)
+    monkeypatch.setattr("core.agents.orchestrator.extract_insights", fake_extract)
 
     normalized = normalize_ingestion_request(
         SessionIngestionRequest(
@@ -196,8 +197,9 @@ def test_user_and_company_pipelines_run_concurrently(monkeypatch, mock_neo4j, mo
     )
 
     assert result["insights_stored"] == 0
-    assert set(triage_scopes) == {"user", "global"}
-    assert max_active_triage_calls == 2
+    assert triage_calls == 1
+    assert set(extract_scopes) == {"user", "global"}
+    assert max_active_extract_calls == 2
 
 
 def test_user_pipeline_error_does_not_skip_global_pipeline(monkeypatch, mock_neo4j, mock_chroma) -> None:
@@ -205,7 +207,7 @@ def test_user_pipeline_error_does_not_skip_global_pipeline(monkeypatch, mock_neo
         return transcript
 
     async def fake_triage(_transcript: str, **_kwargs) -> TriageDecision:
-        return TriageDecision(worth_storing=True, reason="durable")
+        return TriageDecision(should_store=True, suggested_scope="both", confidence=0.9, reason="durable")
 
     async def fake_extract(_transcript: str, **kwargs) -> list[InsightDraft]:
         if kwargs.get("scope") == "user":

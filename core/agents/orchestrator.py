@@ -242,6 +242,28 @@ async def _run_for_scope(
     }, scoped_errors
 
 
+def _scope_targets_from_triage(
+    suggested_scope: str,
+    *,
+    contribute_to_global: bool,
+    org_id: str | None,
+) -> list[str]:
+    if suggested_scope not in {"user", "global", "both"}:
+        suggested_scope = "user"
+
+    if suggested_scope == "both":
+        targets = ["user", "global"]
+    else:
+        targets = [suggested_scope]
+
+    if "global" in targets and (not contribute_to_global or not org_id):
+        targets = [scope for scope in targets if scope != "global"]
+        if not targets:
+            targets = ["user"]
+
+    return targets
+
+
 async def run_extraction_pipeline(
     *,
     session_id: str,
@@ -255,6 +277,7 @@ async def run_extraction_pipeline(
     pii_llm: Any | None = None,
     known_pii: list[str] | None = None,
     force_worth_storing: bool = False,
+    scope_override: str | None = None,
 ) -> dict:
     """
     Main pipeline. Call this when a chat is marked complete.
@@ -284,8 +307,54 @@ async def run_extraction_pipeline(
     org_id, company = _company_from_normalized(normalized)
 
     global_summary: dict[str, int | str | None] | None = None
+    triage = None
+    scope_targets = ["user"]
+
+    if not force_worth_storing:
+        try:
+            triage = await run_triage_agent(augmented_transcript, scope=scope_override, company=company)
+        except Exception as exc:
+            logger.error("triage_agent_failed", extra={"session_id": normalized.session_id, "error": str(exc)})
+            return {
+                "insights_stored": 0,
+                "user": {"insights_stored": 0, "edges_written": 0, "skipped_reason": "triage failed"},
+                "global": None,
+                "errors": [f"Triage agent failed: {exc}"],
+                "problems_created": 0,
+                "problems_merged": 0,
+                "solutions_written": 0,
+                "skipped_reason": "triage failed",
+            }
+        if not triage.should_store:
+            skipped = {
+                "insights_stored": 0,
+                "edges_written": 0,
+                "skipped_reason": triage.reason,
+            }
+            return {
+                **skipped,
+                "user": skipped,
+                "global": None,
+                "errors": errors,
+                "problems_created": 0,
+                "problems_merged": 0,
+                "solutions_written": 0,
+                "triage": triage.model_dump(),
+            }
+        scope_targets = _scope_targets_from_triage(
+            triage.suggested_scope,
+            contribute_to_global=contribute_to_global,
+            org_id=org_id,
+        )
+    else:
+        scope_targets = _scope_targets_from_triage(
+            scope_override or "both",
+            contribute_to_global=contribute_to_global,
+            org_id=org_id,
+        )
+
     global_task = None
-    if contribute_to_global and org_id:
+    if "global" in scope_targets:
         pii_values = [value for value in [normalized.user_id, normalized.user_email, *normalized.participant_ids] if value]
         if known_pii:
             pii_values.extend(known_pii)
@@ -307,31 +376,39 @@ async def run_extraction_pipeline(
                 neo4j_client=neo4j_client,
                 chroma_client=chroma_client,
                 contributed_by=normalized.user_email or normalized.user_id,
-                run_triage=not force_worth_storing,
+                run_triage=False,
                 org_id=org_id,
                 company=company,
             )
 
-    user_task = _run_for_scope(
-        scoped_session=normalized,
-        scoped_transcript=augmented_transcript,
-        scoped_user_id=user_id,
-        scope="user",
-        neo4j_client=neo4j_client,
-        chroma_client=chroma_client,
-        user_email=normalized.user_email,
-        run_triage=not force_worth_storing,
-        org_id=org_id,
-        company=company,
-    )
+    user_task = None
+    if "user" in scope_targets:
+        user_task = _run_for_scope(
+            scoped_session=normalized,
+            scoped_transcript=augmented_transcript,
+            scoped_user_id=user_id,
+            scope="user",
+            neo4j_client=neo4j_client,
+            chroma_client=chroma_client,
+            user_email=normalized.user_email,
+            run_triage=False,
+            org_id=org_id,
+            company=company,
+        )
 
-    if global_task is not None:
+    if user_task is not None and global_task is not None:
         (user_summary, user_errors), (global_summary, global_errors) = await asyncio.gather(user_task, global_task)
         errors.extend(user_errors)
         errors.extend(f"Global {error}" for error in global_errors)
-    else:
+    elif user_task is not None:
         user_summary, user_errors = await user_task
         errors.extend(user_errors)
+    elif global_task is not None:
+        (global_summary, global_errors) = await global_task
+        errors.extend(f"Global {error}" for error in global_errors)
+        user_summary = {"insights_stored": 0, "edges_written": 0, "skipped_reason": "triage suggested global scope"}
+    else:
+        user_summary = {"insights_stored": 0, "edges_written": 0, "skipped_reason": "no writable scope"}
 
     total_insights = int(user_summary.get("insights_stored") or 0)
     if global_summary:
@@ -346,4 +423,5 @@ async def run_extraction_pipeline(
         "problems_created": 0,
         "problems_merged": 0,
         "solutions_written": 0,
+        "triage": triage.model_dump() if triage else None,
     }

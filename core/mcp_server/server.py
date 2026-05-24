@@ -574,6 +574,7 @@ async def complete_conversation(
     decisions: list[str] = [],
     problems_solved: list[str] = [],
     worth_storing: bool | None = None,
+    scope: str | None = None,
     session_duration_turns: int = 0,
 ) -> dict:
     """Mark a conversation as complete and write durable Orange memory.
@@ -612,6 +613,7 @@ async def complete_conversation(
         decisions=decisions or [],
         problems_solved=problems_solved or [],
         worth_storing=worth_storing,
+        scope=scope,
         session_duration_turns=session_duration_turns,
     )
     resp = await handle_store_session(
@@ -701,6 +703,7 @@ async def store_session(
     messages: list[dict[str, Any]] | None = None,
     metadata: dict[str, Any] | None = None,
     contribute_to_global: bool = True,
+    scope: str | None = None,
 ) -> dict:
     """Low-level ingestion tool. Prefer complete_conversation for agent/client integrations."""
 
@@ -724,6 +727,7 @@ async def store_session(
         messages=messages or [],
         metadata=metadata or {},
         contribute_to_global=contribute_to_global,
+        scope=scope,
     )
     resp = await handle_store_session(
         req,

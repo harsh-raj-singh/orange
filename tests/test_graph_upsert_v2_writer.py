@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.agents.extraction_outputs import EnrichedProblem, ExtractedSolution, IssueAgentOutput, SolutionAgentOutput
-from core.graph_schema_v2 import ConfidenceLevel, Session, SolutionOutcome, SourceType
+from core.graph_schema_v2 import ConfidenceLevel, Insight, Session, SolutionOutcome, SourceType
 from core.graph_upsert.writer import GraphUpsertEngine
 
 
@@ -30,8 +30,12 @@ class FakeNeo4j:
 
 
 class FakeChroma:
-    def __init__(self) -> None:
+    def __init__(self, query_returns: dict[str, Any] | None = None) -> None:
         self.upserts: list[dict[str, Any]] = []
+        self.query_returns = query_returns or {"ids": [[]], "distances": [[]], "metadatas": [[]]}
+
+    def query(self, **_kwargs: Any) -> dict[str, Any]:
+        return self.query_returns
 
     def upsert(self, **kwargs: Any) -> None:
         self.upserts.append(kwargs)
@@ -124,3 +128,45 @@ def test_upsert_v2_global_vectors_omit_user_identity_and_audit_contributor() -> 
     assert vector_metadata["contributed_by"] == "dev@example.com"
     assert "user_id" not in vector_metadata
     assert "user_email" not in vector_metadata
+
+
+def test_upsert_insights_merges_very_high_similarity_into_canonical_node() -> None:
+    neo4j = FakeNeo4j()
+    chroma = FakeChroma(
+        {
+            "ids": [["existing-vector"]],
+            "distances": [[0.03]],
+            "metadatas": [[
+                {
+                    "node_type": "Insight",
+                    "scope": "user",
+                    "user_id": "dev@example.com",
+                    "neo4j_node_id": "existing-insight",
+                }
+            ]],
+        }
+    )
+    session = Session(node_id="session-insight-merge", source=SourceType.CURSOR, title="merge", summary="summary", message_count=1)
+    insight = Insight(
+        memory_kind="technical_insight",
+        what="same issue came back",
+        how="updated the working mitigation",
+        outcome="resolved",
+        display_label="Repeated CORS issue",
+        display_summary="The repeated issue should update the canonical insight.",
+        raw_session_id=session.node_id,
+        source=SourceType.CURSOR,
+    )
+
+    summary = GraphUpsertEngine(neo4j=neo4j, chroma=chroma, llm=None).upsert_insights(
+        session=session,
+        user_id="dev@example.com",
+        insights=[insight],
+        user_email="dev@example.com",
+    )
+
+    assert summary.insights_stored == 0
+    assert summary.insights_skipped == 1
+    assert chroma.upserts == []
+    assert any("canonical_merge_count" in query and params["node_id"] == "existing-insight" for query, params in neo4j.query_log)
+    assert any(params.get("to_id") == "existing-insight" and params.get("canonical_merge") is True for _, params in neo4j.query_log)

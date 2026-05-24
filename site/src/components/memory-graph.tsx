@@ -1,6 +1,32 @@
 "use client";
 
+import dagre from "dagre";
+import {
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Position,
+  ReactFlow,
+  ReactFlowProvider,
+  useNodesState,
+  type Edge,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type MemoryScopeValue = "user" | "global";
+type MemoryScopeFilter = MemoryScopeValue | "both";
+type InsightOutcomeValue = "resolved" | "exploratory" | "partial" | "abandoned";
+type MemoryKind =
+  | "technical_insight"
+  | "user_fact"
+  | "company_fact"
+  | "preference"
+  | "steering"
+  | "unknown";
 
 type MemoryNode = {
   id: string;
@@ -18,6 +44,7 @@ type MemoryNode = {
     scope?: MemoryScopeValue;
     outcome?: InsightOutcomeValue;
     tags?: string[];
+    memoryKind?: MemoryKind;
   };
   detailTitle?: string;
   detailBody?: string;
@@ -32,10 +59,6 @@ type MemoryNode = {
   nextActions?: string[];
 };
 
-type MemoryScopeValue = "user" | "global";
-type MemoryScopeFilter = MemoryScopeValue | "both";
-type InsightOutcomeValue = "resolved" | "exploratory" | "partial" | "abandoned";
-
 type MemoryEdge = {
   id: string;
   source: string;
@@ -44,8 +67,13 @@ type MemoryEdge = {
   strength?: number;
 };
 
-type NodePosition = Pick<MemoryNode, "x" | "y">;
-type GraphViewport = { scale: number; x: number; y: number };
+type StoredPosition = { x: number; y: number };
+type MemoryFlowNode = Node<MemoryNode & { isNew?: boolean }, "memoryCard">;
+type MemoryFlowEdge = Edge<{ strength?: number; related?: boolean }>;
+
+const NODE_WIDTH = 188;
+const NODE_HEIGHT = 118;
+const STORAGE_PREFIX = "orange-memory-graph-positions:v2";
 
 const memoryNodes: MemoryNode[] = [
   {
@@ -68,6 +96,7 @@ const memoryNodes: MemoryNode[] = [
       scope: "user",
       outcome: "resolved",
       tags: ["fastapi", "cors", "middleware-order"],
+      memoryKind: "technical_insight",
     },
   },
   {
@@ -90,6 +119,7 @@ const memoryNodes: MemoryNode[] = [
       scope: "global",
       outcome: "exploratory",
       tags: ["slack", "gtm", "company-memory"],
+      memoryKind: "company_fact",
     },
   },
   {
@@ -112,6 +142,7 @@ const memoryNodes: MemoryNode[] = [
       scope: "global",
       outcome: "resolved",
       tags: ["markdown", "company-fact", "docs"],
+      memoryKind: "company_fact",
     },
   },
   {
@@ -134,6 +165,7 @@ const memoryNodes: MemoryNode[] = [
       scope: "user",
       outcome: "resolved",
       tags: ["frontend", "website-steering", "private-memory"],
+      memoryKind: "steering",
     },
   },
   {
@@ -156,13 +188,14 @@ const memoryNodes: MemoryNode[] = [
       scope: "global",
       outcome: "partial",
       tags: ["aws-glue", "incident", "company-memory"],
+      memoryKind: "technical_insight",
     },
   },
 ];
 
 const fallbackEdges: MemoryEdge[] = [
-  { id: "cors-steering", source: "cors-insight", target: "website-steering", label: "private", strength: 0.68 },
-  { id: "spain-markdown", source: "spain-gtm", target: "markdown-memory", label: "company", strength: 0.72 },
+  { id: "cors-steering", source: "cors-insight", target: "website-steering", label: "SIMILAR_TO", strength: 0.68 },
+  { id: "spain-markdown", source: "spain-gtm", target: "markdown-memory", label: "SIMILAR_TO", strength: 0.72 },
   { id: "spain-aws", source: "spain-gtm", target: "aws-glue-fact", label: "shared", strength: 0.58 },
   { id: "markdown-aws", source: "markdown-memory", target: "aws-glue-fact", label: "facts", strength: 0.64 },
 ];
@@ -173,14 +206,18 @@ const visibleFallbackEdges = fallbackEdges.filter(
   (edge) => visibleMemoryNodeIds.has(edge.source) && visibleMemoryNodeIds.has(edge.target),
 );
 
-const kindClass: Record<MemoryNode["kind"], string> = {
-  Insight: "border-[#2f7f78] bg-[#eefbf8] text-[#1f5d58]",
-  Problem: "border-[#c5551c] bg-[#fff8ec] text-[#8f3b14]",
-  Attempt: "border-[#c3a46b] bg-[#fffdf6] text-[#6d5421]",
-  Solution: "border-[#2f6f5e] bg-[#f1faf5] text-[#205545]",
-  Artifact: "border-[#5f746b] bg-[#f7f9f6] text-[#344740]",
-  Concept: "border-[#839a8d] bg-white text-[#40554b]",
-  Session: "border-[#24352d] bg-[#f6f7f4] text-[#24352d]",
+const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
+  { value: "user", label: "My Memory" },
+  { value: "global", label: "Global" },
+];
+
+const memoryKindStyles: Record<MemoryKind, { accent: string; bg: string; border: string; text: string }> = {
+  technical_insight: { accent: "#2f7f78", bg: "#eefbf8", border: "#9ed6cc", text: "#1f5d58" },
+  preference: { accent: "#9a5c16", bg: "#fff8ec", border: "#efc985", text: "#7a430c" },
+  steering: { accent: "#c5551c", bg: "#fff3e8", border: "#f0b17f", text: "#8f3b14" },
+  company_fact: { accent: "#55479a", bg: "#f5f2ff", border: "#b9afe9", text: "#40347f" },
+  user_fact: { accent: "#2f6f5e", bg: "#f1faf5", border: "#a9d8c7", text: "#205545" },
+  unknown: { accent: "#5f746b", bg: "#f7f9f6", border: "#cdd6ce", text: "#344740" },
 };
 
 const outcomeClass: Record<InsightOutcomeValue, string> = {
@@ -188,16 +225,6 @@ const outcomeClass: Record<InsightOutcomeValue, string> = {
   exploratory: "bg-[#eef6ff] text-[#2f5f8f]",
   partial: "bg-[#fff8ec] text-[#9a5c16]",
   abandoned: "bg-[#f3f4f2] text-[#5f6a64]",
-};
-
-const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
-  { value: "user", label: "My Memory" },
-  { value: "global", label: "Global" },
-];
-
-const scopeNodeClass: Record<MemoryScopeValue, string> = {
-  user: "shadow-[0_16px_38px_rgba(197,85,28,0.16)]",
-  global: "shadow-[0_16px_38px_rgba(85,71,154,0.16)]",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -235,47 +262,44 @@ function normalizeOutcome(value: unknown): InsightOutcomeValue | undefined {
     : undefined;
 }
 
-function truncateLabel(value: string, maxLength = 30) {
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1).trim()}...`;
-}
-
-function clampPosition(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function hashNodeId(id: string) {
-  let hash = 0;
-
-  for (let index = 0; index < id.length; index += 1) {
-    hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
-  }
-
-  return hash;
-}
-
-function positionForNode(id: string) {
-  const hash = hashNodeId(id);
-  const angle = ((hash % 360) / 180) * Math.PI;
-  const radius = 0.72 + ((hash >> 8) % 24) / 100;
-
-  return {
-    x: clampPosition(50 + Math.cos(angle) * 34 * radius, 12, 88),
-    y: clampPosition(50 + Math.sin(angle) * 28 * radius, 14, 84),
-  };
+function normalizeMemoryKind(value: unknown): MemoryKind {
+  return value === "technical_insight" ||
+    value === "user_fact" ||
+    value === "company_fact" ||
+    value === "preference" ||
+    value === "steering"
+    ? value
+    : "unknown";
 }
 
 function normalizeKind(value: unknown): MemoryNode["kind"] {
   const kind = asString(value);
 
-  if (kind && kind in kindClass) {
-    return kind as MemoryNode["kind"];
+  if (
+    kind === "Insight" ||
+    kind === "Problem" ||
+    kind === "Attempt" ||
+    kind === "Solution" ||
+    kind === "Artifact" ||
+    kind === "Concept" ||
+    kind === "Session"
+  ) {
+    return kind;
   }
 
   return "Concept";
 }
 
+function truncateLabel(value: string, maxLength = 36) {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1).trim()}...`;
+}
+
 function nodeScope(node?: MemoryNode): MemoryScopeValue {
   return node?.metadata?.scope ?? "user";
+}
+
+function nodeMemoryKind(node?: MemoryNode): MemoryKind {
+  return normalizeMemoryKind(node?.metadata?.memoryKind);
 }
 
 function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null {
@@ -290,19 +314,6 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
   }
 
   const detail = isRecord(value.detail) ? value.detail : undefined;
-  const coordinates = {
-    x: asNumber(value.x),
-    y: asNumber(value.y),
-  };
-  const position =
-    coordinates.x !== undefined && coordinates.y !== undefined
-      ? {
-          x: clampPosition(coordinates.x, 12, 88),
-          y: clampPosition(coordinates.y, 14, 84),
-        }
-      : existing
-        ? { x: existing.x, y: existing.y }
-        : positionForNode(id);
   const metadata = isRecord(value.metadata)
     ? {
         owner: asString(value.metadata.owner),
@@ -312,19 +323,22 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
         scope: normalizeScope(value.metadata.scope),
         outcome: normalizeOutcome(value.metadata.outcome),
         tags: asStringArray(value.metadata.tags),
+        memoryKind: normalizeMemoryKind(value.metadata.memoryKind ?? value.metadata.memory_kind),
       }
     : existing?.metadata;
   const detailBody = asString(value.detail) ?? asString(detail?.body) ?? existing?.detailBody;
   const rawContext = asString(detail?.fullContext) ?? asString(detail?.rawDescription) ?? existing?.rawContext;
   const tags = asStringArray(detail?.tags) ?? metadata?.tags ?? existing?.tags;
   const outcome = normalizeOutcome(detail?.outcome) ?? metadata?.outcome ?? existing?.outcome;
+  const x = asNumber(value.x) ?? existing?.x ?? 50;
+  const y = asNumber(value.y) ?? existing?.y ?? 50;
 
   return {
     id,
     label: asString(value.label) ?? existing?.label ?? "Untitled memory",
     kind: normalizeKind(value.kind ?? value.type ?? existing?.kind),
-    x: position.x,
-    y: position.y,
+    x,
+    y,
     summary: asString(value.summary) ?? existing?.summary ?? "New memory node waiting for context.",
     score: asNumber(value.score) ?? existing?.score,
     metadata,
@@ -363,6 +377,17 @@ function normalizeEdge(value: unknown): MemoryEdge | null {
   };
 }
 
+function isSimilarEdge(edge: MemoryEdge) {
+  return edge.label?.toUpperCase() === "SIMILAR_TO";
+}
+
+function edgeLabel(edge: MemoryEdge) {
+  if (isSimilarEdge(edge)) {
+    return `SIMILAR_TO ${((edge.strength ?? 0) * 100).toFixed(0)}%`;
+  }
+  return edge.label;
+}
+
 function formatDate(value?: string) {
   if (!value) {
     return undefined;
@@ -382,17 +407,265 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
+function storageKey(scope: MemoryScopeFilter) {
+  return `${STORAGE_PREFIX}:${scope}`;
+}
+
+function readStoredPositions(scope: MemoryScopeFilter): Record<string, StoredPosition> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(storageKey(scope));
+    const parsed = raw ? (JSON.parse(raw) as Record<string, StoredPosition>) : {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([, position]) =>
+          Number.isFinite(position?.x) &&
+          Number.isFinite(position?.y),
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredPositions(scope: MemoryScopeFilter, positions: Record<string, StoredPosition>) {
+  try {
+    window.localStorage.setItem(storageKey(scope), JSON.stringify(positions));
+  } catch {
+    // Position persistence is a convenience; graph interaction should continue without it.
+  }
+}
+
+function positionsEqual(left: Record<string, StoredPosition>, right: Record<string, StoredPosition>) {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([id, position]) => {
+    const other = right[id];
+    return other && other.x === position.x && other.y === position.y;
+  });
+}
+
+function graphHydrationSignature(
+  nodes: MemoryNode[],
+  edges: MemoryEdge[],
+  scope: MemoryScopeFilter,
+) {
+  return JSON.stringify({
+    scope,
+    nodes: nodes.map((node) => [
+      node.id,
+      node.kind,
+      node.label,
+      node.summary,
+      nodeScope(node),
+      nodeMemoryKind(node),
+      node.metadata?.status,
+      node.outcome,
+      node.score,
+      node.what,
+      node.why,
+      node.how,
+      node.tags?.join("|"),
+    ]),
+    edges: edges.map((edge) => [edge.id, edge.source, edge.target, edge.label, edge.strength]),
+  });
+}
+
+function layoutNodes(
+  memoryNodesInput: MemoryNode[],
+  memoryEdgesInput: MemoryEdge[],
+  storedPositions: Record<string, StoredPosition>,
+  newNodeIds: Set<string>,
+): MemoryFlowNode[] {
+  const graph = new dagre.graphlib.Graph();
+  graph.setDefaultEdgeLabel(() => ({}));
+  graph.setGraph({ rankdir: "LR", nodesep: 70, ranksep: 110, marginx: 40, marginy: 40 });
+
+  memoryNodesInput.forEach((node) => {
+    graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+  });
+  memoryEdgesInput
+    .filter((edge) => !isSimilarEdge(edge))
+    .forEach((edge) => {
+      graph.setEdge(edge.source, edge.target);
+    });
+
+  dagre.layout(graph);
+
+  const positions = new Map<string, StoredPosition>();
+  memoryNodesInput.forEach((node) => {
+    const stored = storedPositions[node.id];
+    const dagreNode = graph.node(node.id);
+    positions.set(
+      node.id,
+      stored ?? {
+        x: dagreNode ? dagreNode.x - NODE_WIDTH / 2 : node.x * 8,
+        y: dagreNode ? dagreNode.y - NODE_HEIGHT / 2 : node.y * 5,
+      },
+    );
+  });
+
+  const similarGroups = findSimilarGroups(memoryNodesInput, memoryEdgesInput);
+  similarGroups.forEach((group) => {
+    const movable = group.filter((id) => !storedPositions[id]);
+    if (movable.length < 2) {
+      return;
+    }
+
+    const centroid = movable.reduce(
+      (total, id) => {
+        const position = positions.get(id) ?? { x: 0, y: 0 };
+        return { x: total.x + position.x, y: total.y + position.y };
+      },
+      { x: 0, y: 0 },
+    );
+    centroid.x /= movable.length;
+    centroid.y /= movable.length;
+
+    const radius = Math.max(96, movable.length * 24);
+    movable.forEach((id, index) => {
+      const angle = (index / movable.length) * Math.PI * 2;
+      positions.set(id, {
+        x: centroid.x + Math.cos(angle) * radius,
+        y: centroid.y + Math.sin(angle) * radius * 0.72,
+      });
+    });
+  });
+
+  return memoryNodesInput.map((node) => ({
+    id: node.id,
+    type: "memoryCard",
+    position: positions.get(node.id) ?? { x: node.x * 8, y: node.y * 5 },
+    data: { ...node, isNew: newNodeIds.has(node.id) },
+  }));
+}
+
+function findSimilarGroups(nodes: MemoryNode[], edges: MemoryEdge[]) {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const adjacency = new Map<string, Set<string>>();
+  edges.filter(isSimilarEdge).forEach((edge) => {
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
+      return;
+    }
+    adjacency.set(edge.source, (adjacency.get(edge.source) ?? new Set()).add(edge.target));
+    adjacency.set(edge.target, (adjacency.get(edge.target) ?? new Set()).add(edge.source));
+  });
+
+  const visited = new Set<string>();
+  const groups: string[][] = [];
+  adjacency.forEach((_neighbors, start) => {
+    if (visited.has(start)) {
+      return;
+    }
+    const group: string[] = [];
+    const stack = [start];
+    visited.add(start);
+    while (stack.length) {
+      const current = stack.pop();
+      if (!current) {
+        continue;
+      }
+      group.push(current);
+      adjacency.get(current)?.forEach((next) => {
+        if (!visited.has(next)) {
+          visited.add(next);
+          stack.push(next);
+        }
+      });
+    }
+    if (group.length > 1) {
+      groups.push(group);
+    }
+  });
+  return groups;
+}
+
+function layoutEdges(memoryEdgesInput: MemoryEdge[]): MemoryFlowEdge[] {
+  return memoryEdgesInput.map((edge) => {
+    const related = isSimilarEdge(edge);
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edgeLabel(edge),
+      type: "smoothstep",
+      data: { strength: edge.strength, related },
+      markerEnd: related ? undefined : { type: MarkerType.ArrowClosed, color: "#9aa79d" },
+      labelBgBorderRadius: 5,
+      labelBgPadding: [6, 3],
+      labelBgStyle: { fill: related ? "#fbfaf5" : "#ffffff", fillOpacity: 0.86 },
+      style: {
+        stroke: related ? "#b8aaa0" : "#9aa79d",
+        strokeDasharray: related ? "6 7" : undefined,
+        strokeOpacity: related ? 0.62 : 0.38 + (edge.strength ?? 0.7) * 0.22,
+        strokeWidth: related ? 1.5 : 1.2 + (edge.strength ?? 0.7),
+      },
+    };
+  });
+}
+
+function MemoryCardNode({ data, selected }: NodeProps<MemoryFlowNode>) {
+  const memoryKind = nodeMemoryKind(data);
+  const style = memoryKindStyles[memoryKind];
+  const scope = nodeScope(data);
+
+  return (
+    <button
+      type="button"
+      className={`group w-[11.75rem] rounded-lg border px-3 py-3 text-left shadow-[0_16px_38px_rgba(36,53,45,0.12)] transition ${
+        selected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-0.5"
+      } ${data.isNew ? "animate-[node-pop_520ms_ease_forwards]" : ""}`}
+      style={{ background: style.bg, borderColor: style.border, color: style.text }}
+    >
+      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0" style={{ background: style.accent }} />
+      <span className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.14em]">
+          {memoryKind.replace("_", " ")}
+        </span>
+        <span
+          className="h-2 w-2 rounded-full"
+          style={{ background: scope === "global" ? "#55479a" : "#c5551c" }}
+          aria-hidden="true"
+        />
+      </span>
+      <span className="mt-1 block text-sm font-semibold leading-5 text-[#182019]">{truncateLabel(data.label)}</span>
+      <span className="mt-2 line-clamp-2 block text-xs leading-5 opacity-80">{data.summary}</span>
+      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0" style={{ background: style.accent }} />
+    </button>
+  );
+}
+
+const nodeTypes = { memoryCard: MemoryCardNode };
+
 export default function MemoryGraph() {
-  const [nodes, setNodes] = useState(visibleMemoryNodes);
-  const [edges, setEdges] = useState<MemoryEdge[]>(visibleFallbackEdges);
+  return (
+    <ReactFlowProvider>
+      <MemoryGraphInner />
+    </ReactFlowProvider>
+  );
+}
+
+function MemoryGraphInner() {
+  const [memoryNodeList, setMemoryNodeList] = useState(visibleMemoryNodes);
+  const [memoryEdgeList, setMemoryEdgeList] = useState<MemoryEdge[]>(visibleFallbackEdges);
   const [selectedId, setSelectedId] = useState("cors-insight");
   const [scope, setScope] = useState<MemoryScopeFilter>("user");
+  const [nodePositions, setNodePositions] = useState<Record<string, StoredPosition>>(() => readStoredPositions("user"));
+  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<MemoryFlowNode>(
+    layoutNodes(visibleMemoryNodes, visibleFallbackEdges, readStoredPositions("user"), new Set()),
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [graphSource, setGraphSource] = useState<"backend" | "fallback">("fallback");
   const [hasLoadedGraph, setHasLoadedGraph] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
-  const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set());
-  const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
   const [introVisible, setIntroVisible] = useState(false);
   const [userEmail, setUserEmail] = useState(() => {
     if (typeof window === "undefined") {
@@ -425,94 +698,70 @@ export default function MemoryGraph() {
     }
   });
   const graphRef = useRef<HTMLDivElement>(null);
-  const graphLayerRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
-  const panRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
-  const viewportRef = useRef<GraphViewport>(viewport);
-  const nodePositionsRef = useRef<Record<string, NodePosition>>(
-    Object.fromEntries(visibleMemoryNodes.map((node) => [node.id, { x: node.x, y: node.y }])),
-  );
-  const nodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const edgeRefs = useRef<Record<string, SVGLineElement | null>>({});
-  const edgeLabelRefs = useRef<Record<string, SVGTextElement | null>>({});
-  const pointerCleanupRef = useRef<(() => void) | null>(null);
+  const memoryNodeListRef = useRef(visibleMemoryNodes);
+  const memoryEdgeListRef = useRef<MemoryEdge[]>(visibleFallbackEdges);
   const seenNodeIdsRef = useRef(new Set(visibleMemoryNodes.map((node) => node.id)));
   const isGraphVisibleRef = useRef(false);
   const hasRevealedGraphRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const graphSourceRef = useRef<"backend" | "fallback">("fallback");
+  const nextFallbackPollAtRef = useRef(0);
+  const lastHydratedSignatureRef = useRef(
+    graphHydrationSignature(visibleMemoryNodes, visibleFallbackEdges, "user"),
+  );
 
   const selectedNode = useMemo(
-    () => nodes.find((node) => node.id === selectedId) ?? nodes[0],
-    [nodes, selectedId],
+    () => memoryNodeList.find((node) => node.id === selectedId) ?? memoryNodeList[0],
+    [memoryNodeList, selectedId],
   );
   const selectedDate = formatDate(selectedNode?.metadata?.createdAt);
   const selectedScope = nodeScope(selectedNode);
+  const flowEdges = useMemo(() => layoutEdges(memoryEdgeList), [memoryEdgeList]);
 
-  const applyViewport = useCallback((nextViewport: GraphViewport) => {
-    const layer = graphLayerRef.current;
-    if (!layer) {
-      return;
-    }
-
-    layer.style.transform = `translate(${nextViewport.x}px, ${nextViewport.y}px) scale(${nextViewport.scale})`;
-  }, []);
-
-  const updateEdgePosition = useCallback((edge: MemoryEdge) => {
-    const start = nodePositionsRef.current[edge.source];
-    const end = nodePositionsRef.current[edge.target];
-    const line = edgeRefs.current[edge.id];
-
-    if (!start || !end || !line) {
-      return;
-    }
-
-    line.setAttribute("x1", `${start.x}%`);
-    line.setAttribute("y1", `${start.y}%`);
-    line.setAttribute("x2", `${end.x}%`);
-    line.setAttribute("y2", `${end.y}%`);
-
-    const label = edgeLabelRefs.current[edge.id];
-    if (label) {
-      label.setAttribute("x", `${(start.x + end.x) / 2}%`);
-      label.setAttribute("y", `${(start.y + end.y) / 2}%`);
-    }
-  }, []);
-
-  const updateConnectedEdges = useCallback(
-    (nodeId?: string) => {
-      for (const edge of edges) {
-        if (nodeId && edge.source !== nodeId && edge.target !== nodeId) {
-          continue;
-        }
-        updateEdgePosition(edge);
+  const persistFlowPositions = useCallback(
+    (nodesToPersist: MemoryFlowNode[]) => {
+      const positions = Object.fromEntries(
+        nodesToPersist.map((node) => [node.id, { x: node.position.x, y: node.position.y }]),
+      );
+      if (positionsEqual(nodePositions, positions)) {
+        return;
       }
+      writeStoredPositions(scope, positions);
+      setNodePositions(positions);
     },
-    [edges, updateEdgePosition],
+    [nodePositions, scope],
   );
 
-  const applyNodePosition = useCallback((id: string, position: NodePosition) => {
-    const node = nodeRefs.current[id];
-    if (!node) {
-      return;
-    }
+  const hydrateFlowNodes = useCallback(
+    (
+      nextNodes: MemoryNode[],
+      nextEdges: MemoryEdge[],
+      nextScope: MemoryScopeFilter,
+      freshIds: Set<string> = new Set(),
+    ) => {
+      if (isDraggingRef.current) {
+        return;
+      }
+      const signature = graphHydrationSignature(nextNodes, nextEdges, nextScope);
+      if (freshIds.size === 0 && lastHydratedSignatureRef.current === signature) {
+        return;
+      }
 
-    node.style.left = `${position.x}%`;
-    node.style.top = `${position.y}%`;
-  }, []);
+      const storedPositions = readStoredPositions(nextScope);
+      lastHydratedSignatureRef.current = signature;
+      setNodePositions(storedPositions);
+      setFlowNodes(layoutNodes(nextNodes, nextEdges, storedPositions, freshIds));
+    },
+    [setFlowNodes],
+  );
 
   useEffect(() => {
-    viewportRef.current = viewport;
-    applyViewport(viewport);
-  }, [applyViewport, viewport]);
+    memoryNodeListRef.current = memoryNodeList;
+  }, [memoryNodeList]);
 
   useEffect(() => {
-    const nextPositions = Object.fromEntries(nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
-    nodePositionsRef.current = nextPositions;
-
-    for (const node of nodes) {
-      applyNodePosition(node.id, nextPositions[node.id]);
-    }
-    updateConnectedEdges();
-  }, [applyNodePosition, nodes, updateConnectedEdges]);
+    memoryEdgeListRef.current = memoryEdgeList;
+  }, [memoryEdgeList]);
 
   useEffect(() => {
     function handleProfileUpdate() {
@@ -535,25 +784,6 @@ export default function MemoryGraph() {
 
     window.addEventListener("orange-demo-profile-updated", handleProfileUpdate);
     return () => window.removeEventListener("orange-demo-profile-updated", handleProfileUpdate);
-  }, []);
-
-  const resolveOverlaps = useCallback((input: MemoryNode[]) => {
-    const next = input.map((node) => ({ ...node }));
-
-    for (let i = 0; i < next.length; i += 1) {
-      for (let j = i + 1; j < next.length; j += 1) {
-        const dx = next[j].x - next[i].x;
-        const dy = next[j].y - next[i].y;
-
-        if (Math.abs(dx) < 10 && Math.abs(dy) < 8) {
-          const direction = j % 2 === 0 ? 1 : -1;
-          next[j].x = clampPosition(next[j].x + 8 * direction, 12, 88);
-          next[j].y = clampPosition(next[j].y + 6, 14, 84);
-        }
-      }
-    }
-
-    return next;
   }, []);
 
   const fetchGraph = useCallback(async (showRefreshing = true, refresh = false) => {
@@ -583,37 +813,69 @@ export default function MemoryGraph() {
       if (!isRecord(graph)) {
         return;
       }
-      setGraphSource(graph.source === "backend" ? "backend" : "fallback");
+      const nextGraphSource = graph.source === "backend" ? "backend" : "fallback";
+      graphSourceRef.current = nextGraphSource;
+      nextFallbackPollAtRef.current = nextGraphSource === "fallback" ? Date.now() + 45_000 : 0;
+      setGraphSource(nextGraphSource);
       setHasLoadedGraph(true);
 
-      setNodes((current) => {
-        const existingById = new Map(current.map((node) => [node.id, node]));
-        const nextNodes = Array.isArray(graph.nodes)
-          ? graph.nodes
-              .map((node) => normalizeNode(node, isRecord(node) ? existingById.get(asString(node.id) ?? "") : undefined))
-              .filter((node): node is MemoryNode => Boolean(node))
-          : [];
+      const currentMemoryNodes = memoryNodeListRef.current;
+      const currentMemoryEdges = memoryEdgeListRef.current;
+      let freshIdSet = new Set<string>();
+      const existingById = new Map(currentMemoryNodes.map((node) => [node.id, node]));
+      const apiNodes = Array.isArray(graph.nodes)
+        ? graph.nodes
+            .map((node) => normalizeNode(node, isRecord(node) ? existingById.get(asString(node.id) ?? "") : undefined))
+            .filter((node): node is MemoryNode => Boolean(node))
+        : [];
+      const nextMemoryNodes =
+        apiNodes.length > 0 || graph.source === "backend"
+          ? apiNodes
+          : visibleMemoryNodes.filter((node) => nodeScope(node) === scope);
 
-        const freshIds = nextNodes
-          .map((node) => node.id)
-          .filter((id) => !seenNodeIdsRef.current.has(id));
-        freshIds.forEach((id) => seenNodeIdsRef.current.add(id));
-        if (freshIds.length > 0) {
-          setNewNodeIds(new Set(freshIds));
-          window.setTimeout(() => setNewNodeIds(new Set()), 500);
-        }
+      const freshIds = nextMemoryNodes
+        .map((node) => node.id)
+        .filter((id) => !seenNodeIdsRef.current.has(id));
+      freshIds.forEach((id) => seenNodeIdsRef.current.add(id));
+      if (freshIds.length > 0) {
+        freshIdSet = new Set(freshIds);
+        window.setTimeout(() => {
+          setFlowNodes((current) =>
+            current.map((node) => ({
+              ...node,
+              data: { ...node.data, isNew: false },
+            })),
+          );
+        }, 600);
+      }
 
-        const resolvedNodes = resolveOverlaps(nextNodes);
-        if (!resolvedNodes.some((node) => node.id === selectedId)) {
-          setSelectedId(resolvedNodes[0]?.id ?? "");
-        }
-        return resolvedNodes;
-      });
+      if (!nextMemoryNodes.some((node) => node.id === selectedId)) {
+        setSelectedId(nextMemoryNodes[0]?.id ?? "");
+      }
 
+      let nextMemoryEdges = currentMemoryEdges;
       if (Array.isArray(graph.edges)) {
         const nextEdges = graph.edges.map(normalizeEdge).filter((edge): edge is MemoryEdge => Boolean(edge));
-        setEdges(nextEdges);
+        nextMemoryEdges =
+          nextEdges.length > 0 || graph.source === "backend"
+            ? nextEdges
+            : visibleFallbackEdges.filter((edge) => {
+                const scopedNodeIds = new Set(
+                  visibleMemoryNodes.filter((node) => nodeScope(node) === scope).map((node) => node.id),
+                );
+                return scopedNodeIds.has(edge.source) && scopedNodeIds.has(edge.target);
+              });
       }
+
+      const currentSignature = graphHydrationSignature(currentMemoryNodes, currentMemoryEdges, scope);
+      const nextSignature = graphHydrationSignature(nextMemoryNodes, nextMemoryEdges, scope);
+      if (currentSignature !== nextSignature) {
+        memoryNodeListRef.current = nextMemoryNodes;
+        memoryEdgeListRef.current = nextMemoryEdges;
+        setMemoryNodeList(nextMemoryNodes);
+        setMemoryEdgeList(nextMemoryEdges);
+      }
+      hydrateFlowNodes(nextMemoryNodes, nextMemoryEdges, scope, freshIdSet);
     } catch (error) {
       console.warn("Unable to refresh memory graph", error);
     } finally {
@@ -621,7 +883,7 @@ export default function MemoryGraph() {
         setIsRefreshing(false);
       }
     }
-  }, [company, resolveOverlaps, scope, selectedId, userEmail]);
+  }, [company, hydrateFlowNodes, scope, selectedId, setFlowNodes, userEmail]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => {
@@ -633,6 +895,9 @@ export default function MemoryGraph() {
     };
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible" && isGraphVisibleRef.current) {
+        if (graphSourceRef.current === "fallback" && Date.now() < nextFallbackPollAtRef.current) {
+          return;
+        }
         void fetchGraph();
       }
     }, 6000);
@@ -699,7 +964,7 @@ export default function MemoryGraph() {
       const detail = normalizeNode(await response.json(), node);
 
       if (detail) {
-        setNodes((current) => current.map((currentNode) => (currentNode.id === node.id ? detail : currentNode)));
+        setMemoryNodeList((current) => current.map((currentNode) => (currentNode.id === node.id ? detail : currentNode)));
       }
     } catch (error) {
       console.warn("Unable to load memory node detail", error);
@@ -707,88 +972,6 @@ export default function MemoryGraph() {
       setDetailLoadingId((current) => (current === node.id ? null : current));
     }
   }
-
-  function moveNode(clientX: number, clientY: number) {
-    const drag = dragRef.current;
-    const bounds = graphLayerRef.current?.getBoundingClientRect();
-
-    if (!drag || !bounds) {
-      return;
-    }
-
-    const nextPosition = {
-      x: clampPosition(((clientX - drag.dx - bounds.left) / bounds.width) * 100, 12, 88),
-      y: clampPosition(((clientY - drag.dy - bounds.top) / bounds.height) * 100, 14, 84),
-    };
-
-    nodePositionsRef.current[drag.id] = nextPosition;
-    applyNodePosition(drag.id, nextPosition);
-    updateConnectedEdges(drag.id);
-  }
-
-  function movePan(clientX: number, clientY: number) {
-    const pan = panRef.current;
-    if (!pan) {
-      return;
-    }
-    const nextViewport = {
-      ...viewportRef.current,
-      x: pan.x + clientX - pan.startX,
-      y: pan.y + clientY - pan.startY,
-    };
-    viewportRef.current = nextViewport;
-    applyViewport(nextViewport);
-  }
-
-  function commitPointerInteraction() {
-    const drag = dragRef.current;
-    const pan = panRef.current;
-
-    if (drag) {
-      setNodes((current) =>
-        current.map((node) => {
-          const position = nodePositionsRef.current[node.id];
-          return position ? { ...node, ...position } : node;
-        }),
-      );
-    }
-
-    if (pan) {
-      setViewport(viewportRef.current);
-    }
-
-    dragRef.current = null;
-    panRef.current = null;
-  }
-
-  function stopWindowPointerTracking() {
-    pointerCleanupRef.current?.();
-    pointerCleanupRef.current = null;
-  }
-
-  function startWindowPointerTracking() {
-    stopWindowPointerTracking();
-
-    const handleMove = (event: PointerEvent) => {
-      moveNode(event.clientX, event.clientY);
-      movePan(event.clientX, event.clientY);
-    };
-    const handleEnd = () => {
-      stopWindowPointerTracking();
-      commitPointerInteraction();
-    };
-
-    window.addEventListener("pointermove", handleMove, { passive: true });
-    window.addEventListener("pointerup", handleEnd, { passive: true });
-    window.addEventListener("pointercancel", handleEnd, { passive: true });
-    pointerCleanupRef.current = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      window.removeEventListener("pointercancel", handleEnd);
-    };
-  }
-
-  useEffect(() => () => stopWindowPointerTracking(), []);
 
   return (
     <div className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] ${introVisible ? "graph-in-view" : ""}`}>
@@ -806,176 +989,84 @@ export default function MemoryGraph() {
                   ? "bg-white text-[#24352d] shadow-sm"
                   : "text-[#5f746b] hover:text-[#24352d]"
               }`}
-              onClick={() => setScope(option.value)}
+              onClick={() => {
+                setScope(option.value);
+                const scopedNodes = visibleMemoryNodes.filter((node) => nodeScope(node) === option.value);
+                const scopedNodeIds = new Set(scopedNodes.map((node) => node.id));
+                const scopedEdges = visibleFallbackEdges.filter(
+                  (edge) => scopedNodeIds.has(edge.source) && scopedNodeIds.has(edge.target),
+                );
+                memoryNodeListRef.current = scopedNodes;
+                memoryEdgeListRef.current = scopedEdges;
+                setMemoryNodeList(scopedNodes);
+                setMemoryEdgeList(scopedEdges);
+                hydrateFlowNodes(scopedNodes, scopedEdges, option.value);
+              }}
             >
               {option.label}
             </button>
           ))}
         </div>
       </div>
+
       <div
         ref={graphRef}
-        className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#24352d]/10 bg-[#fbfaf5] shadow-[0_24px_70px_rgba(36,53,45,0.12)] touch-none sm:min-h-[500px]"
-        onWheel={(event) => {
-          event.preventDefault();
-          setViewport((current) => ({
-            ...current,
-            scale: Math.min(1.8, Math.max(0.72, current.scale + (event.deltaY > 0 ? -0.08 : 0.08))),
-          }));
-        }}
-        onPointerDown={(event) => {
-          if (event.target !== event.currentTarget) {
-            return;
-          }
-          panRef.current = {
-            x: viewportRef.current.x,
-            y: viewportRef.current.y,
-            startX: event.clientX,
-            startY: event.clientY,
-          };
-          startWindowPointerTracking();
-        }}
-        onPointerUp={() => {
-          stopWindowPointerTracking();
-          commitPointerInteraction();
-        }}
-        onPointerLeave={() => {
-          if (!dragRef.current && !panRef.current) {
-            stopWindowPointerTracking();
-          }
-        }}
+        className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#24352d]/10 bg-[#fbfaf5] shadow-[0_24px_70px_rgba(36,53,45,0.12)] sm:min-h-[500px]"
       >
-        <div
-          ref={graphLayerRef}
-          className="absolute inset-0"
-          style={{
-            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
-            transformOrigin: "50% 50%",
+        <ReactFlow
+          nodes={flowNodes}
+          edges={flowEdges}
+          nodeTypes={nodeTypes}
+          fitView
+          minZoom={0.25}
+          maxZoom={1.8}
+          onNodesChange={onNodesChange}
+          onNodeClick={(_event, node) => {
+            void selectNode(node.data);
           }}
+          onNodeDragStart={() => {
+            isDraggingRef.current = true;
+          }}
+          onNodeDragStop={(_event, _node, nodes) => {
+            isDraggingRef.current = false;
+            persistFlowPositions(nodes as MemoryFlowNode[]);
+          }}
+          proOptions={{ hideAttribution: true }}
         >
-          <svg className="absolute inset-0 h-full w-full" role="presentation">
-            {edges.map((edge, index) => {
-              const start = nodes.find((node) => node.id === edge.source);
-              const end = nodes.find((node) => node.id === edge.target);
+          <Background color="#d8ded7" gap={24} />
+          <Controls className="!border-[#24352d]/10 !bg-white/90 !shadow-sm" />
+          <MiniMap
+            className="!right-4 !bottom-4 !h-28 !w-40 !rounded-md !border !border-[#24352d]/10 !bg-white/90 !shadow-sm"
+            maskColor="rgba(36, 53, 45, 0.08)"
+            nodeColor={(node) => memoryKindStyles[nodeMemoryKind((node as MemoryFlowNode).data)].accent}
+            nodeStrokeWidth={2}
+            pannable
+            zoomable
+          />
+        </ReactFlow>
 
-              if (!start || !end) {
-                return null;
-              }
-
-              return (
-                <g className="group" key={edge.id}>
-                  <line
-                    ref={(element) => {
-                      edgeRefs.current[edge.id] = element;
-                    }}
-                    className="graph-edge"
-                    x1={`${start.x}%`}
-                    y1={`${start.y}%`}
-                    x2={`${end.x}%`}
-                    y2={`${end.y}%`}
-                    stroke="#9aa79d"
-                    strokeOpacity={String(0.32 + (edge.strength ?? 0.7) * 0.28)}
-                    strokeWidth={String(1 + (edge.strength ?? 0.7))}
-                    style={{ animationDelay: `${index * 160}ms` }}
-                  />
-                  {edge.label ? (
-                    <text
-                      ref={(element) => {
-                        edgeLabelRefs.current[edge.id] = element;
-                      }}
-                      x={`${(start.x + end.x) / 2}%`}
-                      y={`${(start.y + end.y) / 2}%`}
-                      className="opacity-0 transition-opacity group-hover:opacity-100"
-                      fill="#8f3b14"
-                      fontSize="10"
-                      fontWeight="700"
-                      pointerEvents="none"
-                      textAnchor="middle"
-                    >
-                      {edge.label}
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })}
-          </svg>
-
-          {hasLoadedGraph && nodes.length === 0 ? (
-            <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-              <div className="max-w-sm rounded-lg border border-dashed border-[#9aa79d] bg-white/92 px-5 py-4 text-sm leading-6 text-[#536057] shadow-sm">
-                No notes are visible in this scope yet. Complete a conversation with matching profile details to create private or shared memory here.
-              </div>
+        {hasLoadedGraph && memoryNodeList.length === 0 ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
+            <div className="max-w-sm rounded-lg border border-dashed border-[#9aa79d] bg-white/92 px-5 py-4 text-sm leading-6 text-[#536057] shadow-sm">
+              No notes are visible in this scope yet. Complete a conversation with matching profile details to create private or shared memory here.
             </div>
-          ) : null}
-
-          <div className="absolute left-5 top-5 rounded-md border border-[#24352d]/10 bg-white/88 px-3 py-2 shadow-sm backdrop-blur">
-            <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#c5551c]">
-              Live neighborhood
-            </p>
-            <p className="mt-1 text-xs text-[#536057]">
-              {nodes.length} nodes {isRefreshing ? "syncing" : "linked"}
-            </p>
-            <p
-              className={`mt-1 font-mono text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${
-                graphSource === "backend" ? "text-[#2f6f5e]" : "text-[#9f4218]"
-              }`}
-            >
-              {graphSource === "backend" ? "backend sync" : "demo fallback"}
-            </p>
           </div>
+        ) : null}
 
-          {nodes.map((node, index) => {
-            const isSelected = node.id === selectedNode?.id;
-            const isNew = newNodeIds.has(node.id);
-            const currentScope = nodeScope(node);
-
-            return (
-              <button
-                key={node.id}
-                id={`node-${node.id}`}
-                ref={(element) => {
-                  nodeRefs.current[node.id] = element;
-                }}
-                type="button"
-                className={`memory-node absolute w-[9.75rem] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border px-3 py-3 text-left transition-[opacity,transform,box-shadow] duration-500 active:cursor-grabbing ${kindClass[node.kind]} ${scopeNodeClass[currentScope]} ${
-                  isSelected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-[calc(50%+2px)]"
-                } ${isNew ? "scale-0 opacity-0" : "scale-100 opacity-100"}`}
-                style={{ left: `${node.x}%`, top: `${node.y}%`, animationDelay: `${index * 200}ms` }}
-                onClick={() => {
-                  void selectNode(node);
-                }}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  const nodeBounds = event.currentTarget.getBoundingClientRect();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  setSelectedId(node.id);
-                  nodePositionsRef.current[node.id] = { x: node.x, y: node.y };
-                  dragRef.current = {
-                    id: node.id,
-                    dx: event.clientX - (nodeBounds.left + nodeBounds.width / 2),
-                    dy: event.clientY - (nodeBounds.top + nodeBounds.height / 2),
-                  };
-                  startWindowPointerTracking();
-                }}
-                onPointerUp={(event) => {
-                  event.stopPropagation();
-                  stopWindowPointerTracking();
-                  commitPointerInteraction();
-                }}
-                onPointerCancel={(event) => {
-                  event.stopPropagation();
-                  stopWindowPointerTracking();
-                  commitPointerInteraction();
-                }}
-              >
-                <span className="memory-node-pulse" aria-hidden="true" />
-                <span className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em]">
-                  {node.kind}
-                </span>
-                <span className="mt-1 block text-sm font-semibold leading-5">{truncateLabel(node.label)}</span>
-              </button>
-            );
-          })}
+        <div className="pointer-events-none absolute left-5 top-5 rounded-md border border-[#24352d]/10 bg-white/88 px-3 py-2 shadow-sm backdrop-blur">
+          <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#c5551c]">
+            Live neighborhood
+          </p>
+          <p className="mt-1 text-xs text-[#536057]">
+            {memoryNodeList.length} nodes {isRefreshing ? "syncing" : "linked"}
+          </p>
+          <p
+            className={`mt-1 font-mono text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${
+              graphSource === "backend" ? "text-[#2f6f5e]" : "text-[#9f4218]"
+            }`}
+          >
+            {graphSource === "backend" ? "backend sync" : "demo fallback"}
+          </p>
         </div>
       </div>
 
@@ -988,6 +1079,11 @@ export default function MemoryGraph() {
           <span className="rounded-full bg-[#fff8ec] px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#c5551c]">
             {selectedNode?.kind}
           </span>
+          {selectedNode?.metadata?.memoryKind ? (
+            <span className="rounded-full bg-[#eefbf8] px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#2f7f78]">
+              {selectedNode.metadata.memoryKind.replace("_", " ")}
+            </span>
+          ) : null}
           {selectedNode?.metadata?.status ? (
             <span className="rounded-full bg-[#f1faf5] px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#2f6f5e]">
               {selectedNode.metadata.status}
@@ -995,7 +1091,7 @@ export default function MemoryGraph() {
           ) : null}
           {selectedNode?.score ? (
             <span className="rounded-full bg-[#f7f9f6] px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#5f746b]">
-                  {Math.round(selectedNode.score * 100)}%
+              {Math.round(selectedNode.score * 100)}%
             </span>
           ) : null}
           {selectedNode?.outcome ? (
@@ -1008,7 +1104,7 @@ export default function MemoryGraph() {
               selectedScope === "global" ? "bg-[#f5f2ff] text-[#55479a]" : "bg-[#fff8ec] text-[#8f3b14]"
             }`}
           >
-            {selectedScope === "global" ? "🌐 Shared" : "🔒 Private"}
+            {selectedScope === "global" ? "Shared" : "Private"}
           </span>
         </div>
         <p className="mt-5 text-sm leading-6 text-[#536057]">{selectedNode?.summary}</p>
@@ -1030,6 +1126,12 @@ export default function MemoryGraph() {
               <div>
                 <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#2f7f78]">How</dt>
                 <dd className="mt-1 leading-6">{selectedNode.how}</dd>
+              </div>
+            ) : null}
+            {selectedNode.outcome ? (
+              <div>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#2f7f78]">Outcome</dt>
+                <dd className="mt-1 leading-6">{selectedNode.outcome}</dd>
               </div>
             ) : null}
             {selectedNode.tags?.length ? (

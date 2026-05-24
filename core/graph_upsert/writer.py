@@ -565,6 +565,21 @@ class GraphUpsertEngine:
             if similar and similar["node_id"] == insight.node_id:
                 summary.insights_skipped += 1
                 continue
+            if similar and similar["node_id"] != insight.node_id and similar["similarity_score"] >= 0.95:
+                self._merge_canonical_insight_update(
+                    existing_node_id=similar["node_id"],
+                    insight=insight,
+                )
+                self._run_edge_direct(
+                    from_id=session.node_id,
+                    to_id=similar["node_id"],
+                    edge_type="PRODUCED",
+                    properties={"canonical_merge": True, "similarity_score": similar["similarity_score"]},
+                    scope=scope,
+                    summary=summary,
+                )
+                summary.insights_skipped += 1
+                continue
 
             self._create_insight(insight=insight, source=session.source)
             summary.insights_stored += 1
@@ -653,6 +668,31 @@ class GraphUpsertEngine:
             extraction_version=insight.extraction_version,
         )
         return insight.node_id
+
+    def _merge_canonical_insight_update(self, *, existing_node_id: str, insight: Insight) -> None:
+        outcome = insight.outcome.value if hasattr(insight.outcome, "value") else str(insight.outcome)
+        self._run_neo4j(
+            """
+            MATCH (i:Insight {node_id: $node_id, scope: $scope})
+            SET i.how = CASE
+                    WHEN $how IS NULL OR trim($how) = '' THEN i.how
+                    WHEN i.how IS NULL OR trim(i.how) = '' THEN $how
+                    WHEN i.how CONTAINS $how THEN i.how
+                    ELSE i.how + '\n' + $how
+                END,
+                i.outcome = CASE
+                    WHEN $outcome IN ['resolved', 'partial'] THEN $outcome
+                    ELSE coalesce(i.outcome, $outcome)
+                END,
+                i.updated_at = datetime(),
+                i.canonical_merge_count = coalesce(i.canonical_merge_count, 0) + 1
+            RETURN i.node_id AS node_id
+            """,
+            node_id=existing_node_id,
+            scope=insight.scope,
+            how=insight.how,
+            outcome=outcome,
+        )
 
     def _find_similar_insight(
         self,

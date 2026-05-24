@@ -30,6 +30,7 @@ export type DemoMemoryNode = {
     status?: "open" | "resolved" | "failed" | "active";
     outcome?: "resolved" | "exploratory" | "partial" | "abandoned";
     tags?: string[];
+    memoryKind?: "technical_insight" | "user_fact" | "company_fact" | "preference" | "steering";
   };
 };
 
