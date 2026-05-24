@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { siClaude, siGmail, siLinear } from "simple-icons";
+import { siClaude, siCursor, siGithub, siGmail, siGooglemeet, siLinear, siNotion } from "simple-icons";
 import type { CSSProperties, ReactNode } from "react";
 import GrainCanvas from "@/components/grain-canvas";
 import MemoryGraph from "@/components/memory-graph";
@@ -68,19 +68,61 @@ const appConnections = [
 const contextBlocks = [
   {
     title: "Before another engineer repeats a failed fix",
-    body: "Orange can surface the old reasoning, what failed, and the decision that finally stuck.",
+    body: "Orange surfaces the original reasoning, the paths that didn't work, and the decision that finally stuck — not a vague summary, the actual graph neighborhood.",
   },
   {
     title: "When a new agent joins a codebase cold",
-    body: "It gets compact context first, then can expand into exact graph-backed session history.",
+    body: "It gets compact context first. Then can expand into exact session history, tied to the files and commits where the decision lived.",
   },
   {
-    title: "When the same bug returns in a new form",
-    body: "Vector search finds the semantic match; Neo4j brings back causes, fixes, files, and follow-ups.",
+    title: "When the same bug returns in a different form",
+    body: "Vector search catches the semantic match. Neo4j brings back the cause, the fix, the file, and every follow-up that touched it.",
   },
 ];
 
-const integrations = ["Slack", "Google Meet", "Cursor", "Claude Code", "GitHub", "Gmail", "Linear", "Notion", "MCP"];
+const integrations = [
+  { name: "Slack", icon: "slack" },
+  { name: "Google Meet", icon: "google-meet" },
+  { name: "Cursor", icon: "cursor" },
+  { name: "Claude Code", icon: "claude" },
+  { name: "GitHub", icon: "github" },
+  { name: "Gmail", icon: "gmail" },
+  { name: "Linear", icon: "linear" },
+  { name: "Notion", icon: "notion" },
+];
+
+const integrationGroupStyle: CSSProperties = {
+  minWidth: "max(96rem, 100vw)",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "1rem",
+  paddingRight: "1rem",
+};
+
+const integrationChipStyle: CSSProperties = {
+  display: "inline-flex",
+  minWidth: "10.5rem",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "0.8rem",
+  border: "1px solid rgba(255, 255, 255, 0.14)",
+  borderRadius: "0.5rem",
+  background: "rgba(255, 255, 255, 0.075)",
+  padding: "0.95rem 1.25rem",
+  color: "#dce8df",
+  fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
+  fontSize: "0.95rem",
+  fontWeight: 750,
+  lineHeight: 1,
+  whiteSpace: "nowrap",
+  boxShadow: "inset 0 1px rgba(255, 255, 255, 0.08)",
+};
+
+const integrationIconStyle: CSSProperties = {
+  width: "1.25rem",
+  height: "1.25rem",
+  color: "#ffb36b",
+};
 
 function RevealHeading({
   children,
@@ -106,10 +148,10 @@ function SectionEyebrow({ children, tone = "orange" }: { children: ReactNode; to
   );
 }
 
-function BrandIcon({ icon }: { icon: string }) {
+function BrandIcon({ icon, style }: { icon: string; style?: CSSProperties }) {
   if (icon === "slack") {
     return (
-      <svg aria-hidden="true" viewBox="0 0 122.8 122.8">
+      <svg aria-hidden="true" viewBox="0 0 122.8 122.8" style={style}>
         <path d="M30.3 77.2c0 8.4-6.8 15.2-15.2 15.2S0 85.6 0 77.2 6.8 62 15.2 62h15.2v15.2z" fill="#E01E5A" />
         <path d="M37.9 77.2c0-8.4 6.8-15.2 15.2-15.2s15.2 6.8 15.2 15.2v38c0 8.4-6.8 15.2-15.2 15.2s-15.2-6.8-15.2-15.2v-38z" fill="#E01E5A" />
         <path d="M53.1 30.3c-8.4 0-15.2-6.8-15.2-15.2S44.7 0 53.1 0s15.2 6.8 15.2 15.2v15.2H53.1z" fill="#36C5F0" />
@@ -123,16 +165,41 @@ function BrandIcon({ icon }: { icon: string }) {
   }
 
   const iconMap = {
+    "google-meet": siGooglemeet,
+    cursor: siCursor,
+    github: siGithub,
     gmail: siGmail,
     linear: siLinear,
     claude: siClaude,
+    notion: siNotion,
   } as const;
   const selectedIcon = iconMap[icon as keyof typeof iconMap];
 
   return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
+    <svg aria-hidden="true" viewBox="0 0 24 24" style={style}>
       <path d={selectedIcon.path} fill="currentColor" />
     </svg>
+  );
+}
+
+function IntegrationStrip() {
+  return (
+    <div className="integration-marquee" aria-label="Orange ecosystem integrations">
+      <div className="integration-marquee-track">
+        {[0, 1, 2].map((groupIndex) => (
+          <div className="integration-marquee-group" aria-hidden={groupIndex > 0} key={groupIndex} style={integrationGroupStyle}>
+            {integrations.map((item) => (
+              <span className="integration-chip" key={`${groupIndex}-${item.name}`} style={integrationChipStyle}>
+                <span className="integration-chip-icon">
+                  <BrandIcon icon={item.icon} style={integrationIconStyle} />
+                </span>
+                {item.name}
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -199,7 +266,7 @@ export default function Home() {
               ))}
             </h1>
             <p data-reveal className="mt-6 max-w-2xl text-pretty text-lg leading-8 text-[#c7d0c9] sm:text-xl">
-              Capture developer sessions from Claude Code, Cursor, Slack, Meet, and MCP. Extract durable insights, company facts, private steering, files, and metadata that future agents need before they start repeating work.
+              Your agents forget everything the moment a session ends. Orange captures what happened, what failed, and what finally worked — so the next agent doesn&apos;t start from zero.
             </p>
             <div data-reveal className="mt-8 flex flex-col gap-3 sm:flex-row">
               <a className="hero-cta-watch shimmer-button inline-flex h-12 items-center justify-center rounded-md bg-[#f26d21] px-6 text-sm font-bold text-white shadow-[0_18px_46px_rgba(242,109,33,0.28)] transition hover:scale-[1.02]" href="#story">
@@ -268,17 +335,11 @@ export default function Home() {
       </section>
 
       <section className="border-y border-white/10 bg-[#101713]">
-        <div className="mx-auto grid max-w-7xl gap-6 px-5 py-10 sm:px-8 lg:grid-cols-[1.2fr_1fr] lg:items-center">
-          <p className="text-2xl font-semibold leading-tight text-[#fff9ef]">
-            Recognized as a top-5 infra team project at South Park Commons.
+        <div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-8 sm:px-8">
+          <p className="w-fit rounded-full border border-[#ffb36b]/24 bg-[#ffb36b]/10 px-4 py-2 font-mono text-xs font-semibold text-[#ffd1a3]">
+            Recognized as a top-5 infrastructure project at South Park Commons, Bengaluru.
           </p>
-          <div className="flex flex-wrap gap-2 lg:justify-end" aria-label="Orange ecosystem integrations">
-            {integrations.map((item) => (
-              <span className="rounded-md border border-white/12 bg-white/[0.06] px-3 py-2 font-mono text-xs font-semibold text-[#d7e1d8]" key={item}>
-                {item}
-              </span>
-            ))}
-          </div>
+          <IntegrationStrip />
         </div>
       </section>
 
@@ -290,7 +351,7 @@ export default function Home() {
               The memory loop becomes visible as you scroll.
             </RevealHeading>
             <div className="mt-8 grid gap-3">
-              {["SessionIngestionRequest", "Triage + Insight agents", "recall_memory response"].map((label, index) => (
+              {["A session ends", "Orange extracts what mattered", "The next agent arrives informed"].map((label, index) => (
                 <div className="pipeline-step rounded-lg border border-[#24352d]/12 bg-white p-4 shadow-sm" key={label}>
                   <p className="font-mono text-xs text-[#c5551c]">0{index + 1}</p>
                   <p className="mt-2 text-lg font-semibold text-[#24352d]">{label}</p>
@@ -451,10 +512,10 @@ export default function Home() {
           <div className="mb-10 max-w-3xl">
             <SectionEyebrow tone="green">Test memory capture</SectionEyebrow>
             <RevealHeading className="mt-4 text-4xl font-semibold leading-tight sm:text-5xl">
-              Chat first. Store only when the session is done.
+              See memory form in real time.
             </RevealHeading>
             <p data-reveal className="mt-5 text-lg leading-8 text-[#536057]">
-              Add a profile, talk to the OpenAI-backed demo agent, then mark the conversation done to watch Orange add the session into the shared graph.
+              Pick a handle, talk to the demo agent like you&apos;re debugging something real. When you end the session, watch Orange extract the key decisions, tag them by type, and write them into the shared graph. Anything discussed becomes retrievable by the next agent that walks into the same problem.
             </p>
           </div>
           <TestChat />

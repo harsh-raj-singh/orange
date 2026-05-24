@@ -436,7 +436,7 @@ export default function TestChat() {
         <div className="mb-5 flex flex-col gap-2 border-b border-[#24352d]/10 pb-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-[#c5551c]">
-              Demo profile
+              Start a session
             </p>
             <h2 className="mt-2 text-2xl font-semibold text-[#161b18]">Start a test session</h2>
           </div>
