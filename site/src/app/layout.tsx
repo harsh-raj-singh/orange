@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import SiteMotion from "@/components/site-motion";
 import "./globals.css";
 
@@ -32,6 +33,13 @@ export default function RootLayout({
       <body className="min-h-full antialiased">
         <SiteMotion />
         {children}
+        <Script
+          src="/orange-voice-widget.js"
+          strategy="afterInteractive"
+          data-site-id="orange-site"
+          data-assistant-name="Orange Voice"
+          data-cta-label="Ask Orange"
+        />
       </body>
     </html>
   );
