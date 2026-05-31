@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from core.agents.extraction_outputs import EnrichedProblem, ExtractedSolution, IssueAgentOutput, SolutionAgentOutput
-from core.graph_schema_v2 import ConfidenceLevel, Insight, Session, SolutionOutcome, SourceType
+from core.graph_schema_v2 import Insight, Session, SourceType
 from core.graph_upsert.writer import GraphUpsertEngine
 
 
@@ -24,7 +23,7 @@ class FakeNeo4j:
     def run(self, query: str, **params: Any) -> FakeResult:
         self.query_log.append((query, params))
         if "H4:MERGE_SESSION" in query:
-            self.sessions[(params["node_id"], params["user_id"])] = dict(params)
+            self.sessions[(params["node_id"], params["scope"])] = dict(params)
             return FakeResult({"node_id": params["node_id"]})
         return FakeResult(None)
 
@@ -41,89 +40,65 @@ class FakeChroma:
         self.upserts.append(kwargs)
 
 
-def test_upsert_v2_merges_session_before_edges_and_preserves_source() -> None:
+def test_upsert_insights_merges_session_and_writes_vectors() -> None:
     neo4j = FakeNeo4j()
     chroma = FakeChroma()
-    session = Session(node_id="session-v2", source=SourceType.CURSOR, title="v2", summary="summary", message_count=2)
-    issue_output = IssueAgentOutput(
-        session_id="session-v2",
-        problems=[
-            EnrichedProblem(
-                segment_id="p1",
-                canonical_label="v2 problem",
-                description="problem details",
-                llm_reasoning="reasoning",
-                first_seen_turn=1,
-                last_seen_turn=1,
-            )
-        ],
-    )
-    solution_output = SolutionAgentOutput(
-        session_id="session-v2",
-        solutions=[
-            ExtractedSolution(
-                canonical_label="v2 solution",
-                description="solution details",
-                in_depth_summary="solution details",
-                outcome=SolutionOutcome.SUCCESS,
-                addresses_problem_label="v2 problem",
-                confidence=ConfidenceLevel.HIGH,
-            )
-        ],
+    session = Session(node_id="session-insight", source=SourceType.CURSOR, title="v2", summary="summary", message_count=2)
+    insight = Insight(
+        memory_kind="technical_insight",
+        what="auth failed after package upgrade",
+        how="pinning the adapter restored the flow",
+        outcome="resolved",
+        display_label="OAuth adapter compatibility fix",
+        display_summary="Pinning the adapter restored auth after an upgrade.",
+        source=SourceType.CURSOR,
     )
 
-    summary = GraphUpsertEngine(neo4j=neo4j, chroma=chroma, llm=None).upsert_v2(
+    summary = GraphUpsertEngine(neo4j=neo4j, chroma=chroma).upsert_insights(
         session=session,
-        user_id="u1",
-        issue_output=issue_output,
-        solution_output=solution_output,
+        user_id="dev@example.com",
+        user_email="dev@example.com",
+        insights=[insight],
     )
-
-    first_session_merge = next(i for i, (query, _) in enumerate(neo4j.query_log) if "H4:MERGE_SESSION" in query)
-    first_direct_edge = next(i for i, (query, _) in enumerate(neo4j.query_log) if "MERGE (a)-[r:" in query)
 
     assert summary.sessions_written == 1
-    assert first_session_merge < first_direct_edge
-    assert neo4j.sessions[("session-v2", "u1")]["source"] == "cursor"
-    assert any(params.get("canonical_label") == "v2 problem" and params.get("source") == "cursor" for _, params in neo4j.query_log)
-    assert {upsert["metadatas"][0]["source"] for upsert in chroma.upserts} == {"cursor"}
+    assert summary.insights_stored == 1
+    assert any("MERGE (i:Insight" in query for query, _ in neo4j.query_log)
+    assert any("MERGE (a)-[r:PRODUCED]->(b)" in query for query, _ in neo4j.query_log)
+    assert neo4j.sessions[("session-insight", "user")]["source"] == "cursor"
+    metadata = chroma.upserts[0]["metadatas"][0]
+    assert metadata["node_type"] == "Insight"
+    assert metadata["scope"] == "user"
+    assert metadata["user_email"] == "dev@example.com"
 
 
-def test_upsert_v2_global_vectors_omit_user_identity_and_audit_contributor() -> None:
+def test_upsert_insights_global_vectors_omit_user_identity_and_audit_contributor() -> None:
     neo4j = FakeNeo4j()
     chroma = FakeChroma()
-    session = Session(node_id="session-global", source=SourceType.CURSOR, title="global", summary="summary", message_count=1)
-    issue_output = IssueAgentOutput(
-        session_id="session-global",
-        problems=[
-            EnrichedProblem(
-                segment_id="p1",
-                canonical_label="global problem",
-                description="shared problem details",
-                llm_reasoning="reasoning",
-                first_seen_turn=1,
-                last_seen_turn=1,
-            )
-        ],
+    session = Session(node_id="session-global", source=SourceType.CURSOR, title="global", summary="summary", message_count=1, org_id="acme")
+    insight = Insight(
+        memory_kind="company_fact",
+        what="company uses markdown files for memory",
+        display_label="Markdown company memory",
+        display_summary="The company uses Markdown files as a memory source format.",
+        source=SourceType.CURSOR,
     )
-    solution_output = SolutionAgentOutput(session_id="session-global", solutions=[])
 
-    GraphUpsertEngine(neo4j=neo4j, chroma=chroma, llm=None).upsert_v2(
+    GraphUpsertEngine(neo4j=neo4j, chroma=chroma).upsert_insights(
         session=session,
-        user_id="u1",
-        user_email="dev@example.com",
-        contributed_by="dev@example.com",
+        user_id="dev@example.com",
+        insights=[insight],
         scope="global",
-        issue_output=issue_output,
-        solution_output=solution_output,
+        contributed_by="dev@example.com",
+        org_id="acme",
+        company="Acme",
     )
 
-    problem_write = next(params for query, params in neo4j.query_log if "MERGE (p:Problem" in query)
+    insight_write = next(params for query, params in neo4j.query_log if "MERGE (i:Insight" in query)
     vector_metadata = chroma.upserts[0]["metadatas"][0]
-
-    assert problem_write["scope"] == "global"
-    assert problem_write["user_id"] is None
-    assert problem_write["contributed_by"] == "dev@example.com"
+    assert insight_write["scope"] == "global"
+    assert insight_write["user_id"] is None
+    assert insight_write["contributed_by"] == "dev@example.com"
     assert vector_metadata["scope"] == "global"
     assert vector_metadata["contributed_by"] == "dev@example.com"
     assert "user_id" not in vector_metadata
@@ -154,11 +129,10 @@ def test_upsert_insights_merges_very_high_similarity_into_canonical_node() -> No
         outcome="resolved",
         display_label="Repeated CORS issue",
         display_summary="The repeated issue should update the canonical insight.",
-        raw_session_id=session.node_id,
         source=SourceType.CURSOR,
     )
 
-    summary = GraphUpsertEngine(neo4j=neo4j, chroma=chroma, llm=None).upsert_insights(
+    summary = GraphUpsertEngine(neo4j=neo4j, chroma=chroma).upsert_insights(
         session=session,
         user_id="dev@example.com",
         insights=[insight],
@@ -169,4 +143,7 @@ def test_upsert_insights_merges_very_high_similarity_into_canonical_node() -> No
     assert summary.insights_skipped == 1
     assert chroma.upserts == []
     assert any("canonical_merge_count" in query and params["node_id"] == "existing-insight" for query, params in neo4j.query_log)
-    assert any(params.get("to_id") == "existing-insight" and params.get("canonical_merge") is True for _, params in neo4j.query_log)
+    assert any(
+        params.get("to_id") == "existing-insight" and params.get("properties", {}).get("canonical_merge") is True
+        for _, params in neo4j.query_log
+    )

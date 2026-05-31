@@ -67,24 +67,11 @@ class StoreSessionRequest:
 @dataclass
 class StoreSessionResponse:
     session_id: str
-    problems_created: int = 0
-    problems_merged: int = 0
-    solutions_written: int = 0
     insights_stored: int = 0
     skipped_reason: str | None = None
     errors: list[str] = field(default_factory=list)
 
-
-@dataclass
-class ResolveProblemRequest:
-    session_id: str
-    user_id: str
-    problem_label: str
-    solution_that_worked: str
-
-
-@dataclass
-class ResolveProblemResponse:
-    resolved: bool
-    problem_node_id: str | None
-    solution_node_id: str | None
+    # Compatibility counters for older clients. The active writer stores Insight nodes.
+    problems_created: int = 0
+    problems_merged: int = 0
+    solutions_written: int = 0

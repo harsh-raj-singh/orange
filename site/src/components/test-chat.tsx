@@ -38,8 +38,7 @@ type ChatResponse = {
 
 type CompletionResponse = {
   persisted?: boolean;
-  fallback?: boolean;
-  source?: "backend" | "fallback";
+  source?: "backend";
 };
 
 const emptyProfile: Profile = {
@@ -142,7 +141,7 @@ export default function TestChat() {
   });
   const [contributeToGlobal, setContributeToGlobal] = useState(true);
   const [isProfileSubmitted, setIsProfileSubmitted] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"backend" | "fallback" | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"backend" | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sessionId, setSessionId] = useState<string>(() => createId("orange-session"));
@@ -418,11 +417,7 @@ export default function TestChat() {
 
     try {
       const completion = await completeConversation("user_done");
-      setSaveStatus(
-        completion?.source === "fallback" || completion?.persisted === false
-          ? "fallback"
-          : "backend",
-      );
+      setSaveStatus(completion?.persisted === false ? null : "backend");
     } catch {
       setError("Orange could not mark this conversation done. Your chat is still here.");
     } finally {
@@ -515,18 +510,14 @@ export default function TestChat() {
           </button>
           <p
             className={`text-xs ${
-              saveStatus === "fallback"
-                ? "text-[#9f4218]"
-                : saveStatus === "backend"
+              saveStatus === "backend"
                   ? "text-[#2f6f5e]"
                   : hasUnsavedMessages
                     ? "text-[#5f746b]"
                     : "text-transparent"
             }`}
           >
-            {saveStatus === "fallback"
-              ? "Saved in demo fallback only. Start the Orange backend for cross-app visibility."
-              : saveStatus === "backend"
+            {saveStatus === "backend"
                 ? "Saved to backend memory."
                 : hasUnsavedMessages
                   ? "Unsaved changes in this conversation."

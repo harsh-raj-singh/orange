@@ -1,6 +1,6 @@
 # Orange Memory Fabric
 
-Orange is a memory fabric for developer and agentic workflows. It captures completed sessions from tools like Cursor, Claude Code, MCP, Slack-style chats, Gmail-style threads, and the demo chat, extracts durable memory, stores it in graph/vector form, and retrieves relevant past context when a similar session happens later.
+Orange is a memory fabric for developer and agentic workflows. It captures completed sessions from tools like Cursor, Claude Code, MCP, Slack recordings, and the demo chat, extracts durable memory, stores it in graph/vector form, and retrieves relevant past context when a similar session happens later.
 
 Live demo: [https://site-sage-eta-18.vercel.app](https://site-sage-eta-18.vercel.app)
 
@@ -27,7 +27,7 @@ capture session -> extract memory -> store graph/vector -> retrieve context late
 
 ## What It Does
 
-- Stores unified `Insight` nodes instead of separate Problem/Solution nodes for new writes.
+- Stores unified `Insight` nodes as the only active memory node type.
 - Runs extraction only when a user marks a conversation done.
 - Uses a Triage Agent to avoid storing generic or low-value chats.
 - Extracts engineering insights, user facts, company facts, preferences, and steering.
@@ -75,13 +75,13 @@ Examples:
 - `core/agents/pii_scrubber/` cleans transcripts before company/shared extraction.
 - `core/agents/orchestrator.py` runs the completed-session pipeline.
 
-Legacy `issue_agent` and `solution_agent` folders are still present for reference and backwards compatibility, but the new completed-session pipeline writes `Insight` nodes.
+Older Problem/Solution extraction code has been retired. The completed-session pipeline writes `Insight` nodes directly.
 
 ### Persistence Layer
 
 - `core/graph_upsert/writer.py` writes `Session` and `Insight` nodes plus relationships into Neo4j.
 - `core/graph_upsert/embeddings.py` builds embedding strings for Chroma.
-- `core/graph_upsert/dedup.py` manages Chroma collections and similarity checks.
+- `core/graph_upsert/dedup.py` resolves the scoped Chroma collections.
 - `core/storage/supabase_store.py` stores durable metadata in Supabase/Postgres when configured.
 - `core/graph_schema_v2.py` defines graph-facing data models, including `Insight`.
 
@@ -96,7 +96,7 @@ Company/shared vectors are scoped by company/org metadata so one company's graph
 
 ### Retrieval + Inspection
 
-- `core/mcp_server/server.py` exposes MCP tools such as `recall_memory`, `checkpoint_context`, `store_session`, `inspect_graph`, `get_node`, and `chroma_peek`.
+- `core/mcp_server/server.py` exposes MCP tools such as `recall_memory`, `checkpoint_context`, `complete_conversation`, `store_session`, `inspect_graph`, `get_node`, and `chroma_peek`.
 - `core/mcp_server/handlers.py` contains the MCP tool handlers and retrieval logic.
 - `core/viz_api/routes/demo.py` exposes demo-facing `POST /demo/complete` and `POST /demo/recall_memory`.
 - `core/viz_api/routes/graph.py` serves graph read endpoints used by the demo.
@@ -197,7 +197,7 @@ Useful endpoints:
 - `GET /health`
 - `GET /health/deep`
 - `GET /graph/full`
-- `GET /graph/nodes`
+- `GET /graph/nodes/{node_id}/neighborhood`
 - `GET /chroma/status`
 - `GET /chroma/peek?limit=5`
 - `POST /demo/complete`
@@ -235,14 +235,13 @@ The MCP server currently exposes:
 - `checkpoint_context`
 - `complete_conversation`
 - `store_session`
-- `resolve_problem`
 - `inspect_graph`
 - `get_node`
 - `get_session_graph`
 - `list_sessions`
 - `chroma_peek`
 
-For coding agents, the happy path is `recall_memory` before answering, `checkpoint_context` when important mid-session context should be preserved, and `complete_conversation` once when the session is done. `resolve_problem` remains for compatibility; the current memory write path is session-level Insight extraction.
+For coding agents, the happy path is `recall_memory` before answering, `checkpoint_context` when important mid-session context should be preserved, and `complete_conversation` once when the session is done.
 
 Desktop setup page:
 
@@ -287,10 +286,10 @@ The schema enables RLS and revokes browser-facing `anon`/`authenticated` access.
 
 ## Testing
 
-Focused checks used during current development:
+Backend checks:
 
 ```bash
-PYTHONPATH=. pytest tests/test_insight_pipeline.py tests/test_mcp_handlers.py tests/test_graph_upsert_v2_writer.py tests/test_ingestion_normalization.py
+PYTHONPATH=. pytest -q tests
 ```
 
 Frontend checks:
@@ -300,8 +299,6 @@ cd site
 npm run lint
 npm run build
 ```
-
-Full pytest is not fully clean yet because some legacy tests still import older modules or run live pipeline work during collection.
 
 ## Security Notes
 
@@ -317,6 +314,5 @@ Full pytest is not fully clean yet because some legacy tests still import older 
 - Add `get_job_status(job_id)`
 - Tighten auth and user identity before real org usage
 - Improve extraction observability and benchmarks
-- Clean or delete legacy tests/imports
 - Expand source connectors beyond the demo UI
 - Improve company-scoped graph persistence and admin inspection

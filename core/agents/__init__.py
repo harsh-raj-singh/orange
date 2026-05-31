@@ -1,4 +1,3 @@
-# New agent pipeline - issue + solution extraction
-# Old brainstorm/debug/concept extractors are deprecated and will be removed
+"""Active Orange extraction agents."""
 
 __all__ = []

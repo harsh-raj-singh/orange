@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getDemoMemoryNodeDetailFromStore } from "@/lib/demo-memory-store";
+import { getDemoMemoryNodeDetail } from "@/lib/demo-memory-graph";
 import { backendJsonOrFallback, normalizeDemoGraphScope } from "@/lib/api";
 import type { DemoMemoryNodeDetail } from "@/lib/demo-memory-graph";
 import { transformBackendGraph, type BackendGraph } from "@/lib/orange-graph-transform";
@@ -54,11 +54,7 @@ export async function GET(request: Request, context: RouteContext) {
       }
       return null;
     },
-    fallback: () =>
-      getDemoMemoryNodeDetailFromStore(nodeId, {
-        scope,
-        viewer: { email: userEmail, company },
-      }),
+    fallback: () => getDemoMemoryNodeDetail(nodeId),
   });
 
   if (!node) {

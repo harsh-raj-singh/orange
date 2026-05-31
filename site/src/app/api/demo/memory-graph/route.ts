@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getScopedDemoMemoryGraphSnapshot } from "@/lib/demo-memory-store";
+import { getDemoMemoryGraph } from "@/lib/demo-memory-graph";
 import { backendJsonOrFallback, normalizeDemoGraphScope } from "@/lib/api";
 import { transformBackendGraph, type BackendGraph } from "@/lib/orange-graph-transform";
 
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     backendParams.set("org_id", company.toLowerCase());
   }
 
-  const data = await backendJsonOrFallback<BackendGraph, ReturnType<typeof getScopedDemoMemoryGraphSnapshot>>({
+  const data = await backendJsonOrFallback<BackendGraph, ReturnType<typeof getDemoMemoryGraph>>({
     path: `/graph/full?${backendParams.toString()}`,
     request: refresh
       ? { cache: "no-store" }
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       ...transformBackendGraph(graph, scope),
       persisted: true,
     }),
-    fallback: () => getScopedDemoMemoryGraphSnapshot(scope, { email: userEmail, company }),
+    fallback: () => getDemoMemoryGraph(),
   });
 
   return NextResponse.json(data, {

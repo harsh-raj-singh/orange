@@ -23,10 +23,9 @@ from core.graph_upsert.dedup import (
     ORANGE_GLOBAL_VECTOR_COLLECTION,
     ORANGE_USER_VECTOR_COLLECTION,
 )
-from core.mcp_server.handlers import handle_recall_memory, handle_resolve_problem, handle_store_session
+from core.mcp_server.handlers import handle_recall_memory, handle_store_session
 from core.mcp_server.models import (
     RecallMemoryRequest,
-    ResolveProblemRequest,
     StoreSessionRequest,
 )
 from core.mcp_server.tokens import decode_mcp_token, verify_mcp_token
@@ -319,12 +318,12 @@ def create_http_app(path: str = "/"):
 
 
 def _default_user_email(value: str | None) -> str | None:
-    cleaned = (value or "").strip().lower()
-    if cleaned:
-        return cleaned
     request_email = (_REQUEST_USER_EMAIL.get() or "").strip().lower()
     if request_email:
         return request_email
+    cleaned = (value or "").strip().lower()
+    if cleaned:
+        return cleaned
     env_email = (os.getenv("ORANGE_USER_EMAIL") or "").strip().lower()
     return env_email or None
 
@@ -736,20 +735,6 @@ async def store_session(
         llm=get_llm(),
         postgres_store=get_postgres_store(),
     )
-    return asdict(resp)
-
-
-@_APP.tool()
-async def resolve_problem(session_id: str, user_id: str, problem_label: str, solution_that_worked: str) -> dict:
-    """Legacy compatibility tool for old Problem/Solution graphs; Insight extraction is the current path."""
-
-    req = ResolveProblemRequest(
-        session_id=session_id,
-        user_id=user_id,
-        problem_label=problem_label,
-        solution_that_worked=solution_that_worked,
-    )
-    resp = await handle_resolve_problem(req, neo4j=get_neo4j(), chroma=get_chroma())
     return asdict(resp)
 
 

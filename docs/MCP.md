@@ -52,7 +52,6 @@ Orange still runs triage after completion unless `worth_storing=true` is supplie
 - `complete_conversation`: preferred final write tool for Claude Code, Codex, Cursor, and other MCP clients.
 - `store_session`: low-level ingestion tool kept for compatibility.
 - `inspect_graph`, `get_node`, `get_session_graph`, `list_sessions`, `chroma_peek`: inspection/debugging tools.
-- `resolve_problem`: legacy compatibility tool for old Problem/Solution graphs.
 
 ## Prerequisites
 

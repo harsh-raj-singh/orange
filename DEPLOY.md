@@ -8,7 +8,7 @@ The frontend is deployed separately on Vercel. Railway should deploy only the Fa
 uvicorn core.viz_api.main:app --host 0.0.0.0 --port ${PORT:-8000}
 ```
 
-Railway uses `Dockerfile.railway` and `requirements-railway.txt` so the backend deploy does not install the frontend, Streamlit debug tools, or Torch wheels. The requirements file includes Slack Bot dependencies so the same image can also be reused by a separate Slack worker service.
+Railway uses `Dockerfile.railway` and `requirements-railway.txt` so the backend deploy does not install the frontend or heavyweight local-only packages. The requirements file includes Slack Bot dependencies so the same image can also be reused by a separate Slack worker service.
 
 Railway uses `/health` as a lightweight health check:
 
@@ -53,6 +53,9 @@ railway variables set NEO4J_PASSWORD=your-password
 railway variables set OPENAI_API_KEY=sk-...
 railway variables set OPENAI_MODEL=gpt-5.4-nano
 railway variables set ALLOWED_ORIGINS=https://site-sage-eta-18.vercel.app,http://localhost:3000,http://localhost:3004
+railway variables set ORANGE_MCP_SIGNING_SECRET=$(openssl rand -hex 32)
+railway variables set ORANGE_PUBLIC_BACKEND_URL=https://your-railway-url.up.railway.app
+railway variables set GOOGLE_CLIENT_ID=your-google-web-client-id.apps.googleusercontent.com
 ```
 
 The code also supports the existing Memgraph-style names:

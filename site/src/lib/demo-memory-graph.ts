@@ -42,6 +42,12 @@ export type DemoMemoryEdge = {
   strength: number;
 };
 
+export type DemoMemoryGraphSnapshot = {
+  generatedAt: string;
+  nodes: DemoMemoryNode[];
+  edges: DemoMemoryEdge[];
+};
+
 export type DemoMemoryNodeDetail = DemoMemoryNode & {
   detail: {
     title: string;
@@ -55,6 +61,28 @@ export type DemoMemoryNodeDetail = DemoMemoryNode & {
     outcome?: string;
     tags?: string[];
   };
+};
+
+export type DemoConversationProfile = {
+  name?: string;
+  email?: string;
+  role?: string;
+  company?: string;
+  team?: string;
+  project?: string;
+  teamProject?: string;
+};
+
+export type CompleteDemoConversationInput = {
+  sessionId?: string;
+  trigger?: string;
+  source?: string;
+  profile?: DemoConversationProfile;
+  messages?: {
+    role?: string;
+    content?: unknown;
+  }[];
+  contribute_to_global?: boolean;
 };
 
 export const demoMemoryGraphNodes = [
@@ -280,7 +308,7 @@ export const demoMemoryGraphDetails = {
   },
 } satisfies Record<string, DemoMemoryNodeDetail>;
 
-export function getDemoMemoryGraph() {
+export function getDemoMemoryGraph(): DemoMemoryGraphSnapshot {
   return {
     generatedAt: "2026-05-15T10:00:00.000Z",
     nodes: demoMemoryGraphNodes,
