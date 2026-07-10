@@ -380,7 +380,9 @@ class GraphUpsertEngine:
                 s.source_url = $source_url,
                 s.started_at = $started_at,
                 s.ended_at = $ended_at,
-                s.ingested_at = $ingested_at
+                s.ingested_at = $ingested_at,
+                s.created_at = coalesce(s.created_at, datetime()),
+                s.updated_at = datetime()
             RETURN s.node_id AS node_id
             """,
             node_id=session.node_id,

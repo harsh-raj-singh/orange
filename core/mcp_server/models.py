@@ -70,6 +70,9 @@ class StoreSessionResponse:
     insights_stored: int = 0
     skipped_reason: str | None = None
     errors: list[str] = field(default_factory=list)
+    job_id: str | None = None
+    job_status: str | None = None
+    accepted: bool = False
 
     # Compatibility counters for older clients. The active writer stores Insight nodes.
     problems_created: int = 0

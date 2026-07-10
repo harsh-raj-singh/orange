@@ -89,7 +89,11 @@ async def _fetch_insight_node(neo4j: object, node_id: str) -> dict | None:
 
 
 async def handle_recall_memory(
-    req: RecallMemoryRequest, *, neo4j: object, chroma: object
+    req: RecallMemoryRequest,
+    *,
+    repository: object | None = None,
+    neo4j: object | None = None,
+    chroma: object | None = None,
 ) -> RecallMemoryResponse:
     query = (req.query or "").strip()
     if not query:
@@ -104,6 +108,87 @@ async def handle_recall_memory(
         raise ValueError("scope must be one of: user, global, both")
     _parse_source(req.source)
     min_score = float(getattr(req, "min_score", 0.70))
+
+    if repository is not None:
+        rows = await asyncio.to_thread(
+            repository.search_insights,
+            query,
+            user_id=user_id,
+            user_email=user_email or None,
+            org_id=org_id or None,
+            scope=scope,
+            limit=6,
+            min_score=min_score,
+        )
+        matched_nodes: list[MatchedNode] = []
+        node_ids_used: list[str] = []
+        by_label: dict[str, MatchedNode] = {}
+        for row in rows:
+            vector_scope = str(row.get("scope") or "user").strip().lower()
+            node_id = str(row.get("node_id") or "").strip()
+            if not node_id:
+                continue
+            score = round(float(row.get("similarity_score") or 0.0), 4)
+            neighborhood = {
+                "raw_session_id": row.get("raw_session_id"),
+                "session_node_id": row.get("session_node_id"),
+                "session_title": row.get("session_title"),
+                "session_summary": row.get("session_summary"),
+                "similar_insights": row.get("similar_insights") or [],
+            }
+            node_data = {
+                key: value
+                for key, value in row.items()
+                if key
+                not in {
+                    "node_id",
+                    "similarity_score",
+                    "session_node_id",
+                    "session_title",
+                    "session_summary",
+                    "similar_insights",
+                }
+            }
+            label_key = str(
+                node_data.get("display_label") or node_data.get("what") or ""
+            ).strip().lower()
+            existing_match = by_label.get(label_key) if label_key else None
+            if existing_match is not None:
+                if existing_match.source == "user" and vector_scope == "global":
+                    existing_match.also_available_in_global = True
+                    existing_match.node_data["global_exists"] = True
+                    continue
+                if existing_match.source == "global" and vector_scope == "user":
+                    matched_nodes.remove(existing_match)
+                    try:
+                        node_ids_used.remove(
+                            str(existing_match.node_data.get("node_id") or "")
+                        )
+                    except ValueError:
+                        pass
+                else:
+                    continue
+
+            node_data["node_id"] = node_id
+            match = MatchedNode(
+                node_type="Insight",
+                similarity_score=score,
+                node_data=node_data,
+                neighborhood=neighborhood,
+                source="global" if vector_scope == "global" else "user",
+            )
+            matched_nodes.append(match)
+            node_ids_used.append(node_id)
+            if label_key:
+                by_label[label_key] = match
+        return RecallMemoryResponse(
+            query=query,
+            matched_nodes=matched_nodes,
+            node_ids_used=node_ids_used,
+        )
+
+    if neo4j is None or chroma is None:
+        raise RuntimeError("Postgres memory repository is required.")
 
     scoped_results: list[tuple[str, dict, float]] = []
     if scope in {"user", "both"}:
@@ -291,10 +376,12 @@ def _structured_completion_context(req: StoreSessionRequest) -> str:
 async def handle_store_session(
     req: StoreSessionRequest,
     *,
-    neo4j: object,
-    chroma: object,
+    repository: object | None = None,
+    neo4j: object | None = None,
+    chroma: object | None = None,
     llm: object | None,
     postgres_store: object | None = None,
+    enqueue_only: bool = False,
 ) -> StoreSessionResponse:
     transcript = (req.transcript or "").strip()
     structured_context = _structured_completion_context(req)
@@ -320,6 +407,7 @@ async def handle_store_session(
         metadata["problems_solved"] = _clean_string_list(req.problems_solved)
     if req.worth_storing is not None:
         metadata["worth_storing"] = bool(req.worth_storing)
+    metadata["contribute_to_global"] = bool(req.contribute_to_global)
     scope_override = (req.scope or "").strip().lower() or None
     if scope_override and scope_override not in {"user", "global", "both"}:
         raise ValueError("scope must be one of: user, global, both")
@@ -356,18 +444,54 @@ async def handle_store_session(
         raise ValueError("user_id or user_email is required")
 
     cache_key = (user_id, session_id, source.value, _store_session_fingerprint(normalized.transcript))
-    if cache_key in _STORE_SESSION_CACHE:
+    if repository is None and cache_key in _STORE_SESSION_CACHE:
         return _STORE_SESSION_CACHE[cache_key]
 
+    durable_store = repository or postgres_store
     stored_ingestion_id: str | None = None
-    if postgres_store is not None and hasattr(postgres_store, "record_normalized_session"):
+    stored_job_id: str | None = None
+    if durable_store is not None and hasattr(durable_store, "record_normalized_session"):
         try:
-            stored = postgres_store.record_normalized_session(normalized, status="received")
+            record_kwargs: dict[str, Any] = {"status": "received"}
+            if repository is not None:
+                record_kwargs["organization_name"] = company or None
+            stored = await asyncio.to_thread(
+                durable_store.record_normalized_session,
+                normalized,
+                **record_kwargs,
+            )
             stored_ingestion_id = getattr(stored, "ingestion_id", None)
+            stored_job_id = getattr(stored, "memory_job_id", None)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
+            logger.error(
                 "postgres_ingestion_record_failed",
                 extra={"session_id": session_id, "user_id": user_id, "error": str(exc)},
+            )
+            if repository is not None:
+                raise
+
+    if repository is not None and stored_job_id and hasattr(repository, "get_memory_write_job"):
+        existing_job = await asyncio.to_thread(
+            repository.get_memory_write_job,
+            job_id=stored_job_id,
+        )
+        if existing_job and existing_job.get("status") == "succeeded":
+            result = dict(existing_job.get("result") or {})
+            return StoreSessionResponse(
+                session_id=session_id,
+                insights_stored=int(result.get("insights_stored") or 0),
+                skipped_reason=result.get("skipped_reason"),
+                errors=list(result.get("errors") or []),
+                job_id=stored_job_id,
+                job_status="succeeded",
+                accepted=True,
+            )
+        if enqueue_only:
+            return StoreSessionResponse(
+                session_id=session_id,
+                job_id=stored_job_id,
+                job_status=str((existing_job or {}).get("status") or "queued"),
+                accepted=True,
             )
 
     try:
@@ -377,17 +501,40 @@ async def handle_store_session(
             transcript=normalized.transcript,
             source=source,
             normalized_session=normalized,
+            memory_repository=repository,
             neo4j_client=neo4j,
             chroma_client=chroma,
             contribute_to_global=req.contribute_to_global,
             pii_llm=llm,
             force_worth_storing=req.worth_storing is True,
             scope_override=scope_override,
+            source_ingestion_id=stored_ingestion_id,
         )
-    except Exception:
-        if postgres_store is not None and stored_ingestion_id and hasattr(postgres_store, "mark_session_status"):
+    except Exception as pipeline_error:
+        if (
+            repository is not None
+            and stored_job_id
+            and hasattr(repository, "finish_memory_write_job_inline")
+        ):
             try:
-                postgres_store.mark_session_status(ingestion_id=stored_ingestion_id, status="failed")
+                await asyncio.to_thread(
+                    repository.finish_memory_write_job_inline,
+                    stored_job_id,
+                    succeeded=False,
+                    error=str(pipeline_error),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "postgres_memory_job_finish_failed",
+                    extra={"job_id": stored_job_id, "error": str(exc)},
+                )
+        if durable_store is not None and stored_ingestion_id and hasattr(durable_store, "mark_session_status"):
+            try:
+                await asyncio.to_thread(
+                    durable_store.mark_session_status,
+                    ingestion_id=stored_ingestion_id,
+                    status="failed",
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "postgres_ingestion_status_failed",
@@ -395,9 +542,25 @@ async def handle_store_session(
                 )
         raise
 
-    if postgres_store is not None and stored_ingestion_id and hasattr(postgres_store, "mark_session_status"):
+    if (
+        repository is not None
+        and stored_job_id
+        and hasattr(repository, "finish_memory_write_job_inline")
+    ):
+        await asyncio.to_thread(
+            repository.finish_memory_write_job_inline,
+            stored_job_id,
+            succeeded=True,
+            result=result,
+        )
+
+    if durable_store is not None and stored_ingestion_id and hasattr(durable_store, "mark_session_status"):
         try:
-            postgres_store.mark_session_status(ingestion_id=stored_ingestion_id, status="processed")
+            await asyncio.to_thread(
+                durable_store.mark_session_status,
+                ingestion_id=stored_ingestion_id,
+                status="processed",
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "postgres_ingestion_status_failed",
@@ -409,6 +572,10 @@ async def handle_store_session(
         insights_stored=result.get("insights_stored", 0),
         skipped_reason=result.get("skipped_reason"),
         errors=list(result.get("errors") or []),
+        job_id=stored_job_id,
+        job_status="succeeded" if stored_job_id else None,
+        accepted=bool(stored_job_id),
     )
-    _STORE_SESSION_CACHE[cache_key] = response
+    if repository is None:
+        _STORE_SESSION_CACHE[cache_key] = response
     return response

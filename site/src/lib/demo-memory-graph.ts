@@ -31,6 +31,7 @@ export type DemoMemoryNode = {
     outcome?: "resolved" | "exploratory" | "partial" | "abandoned";
     tags?: string[];
     memoryKind?: "technical_insight" | "user_fact" | "company_fact" | "preference" | "steering";
+    scope?: "user" | "global";
   };
 };
 
@@ -46,6 +47,8 @@ export type DemoMemoryGraphSnapshot = {
   generatedAt: string;
   nodes: DemoMemoryNode[];
   edges: DemoMemoryEdge[];
+  persisted?: boolean;
+  source?: "backend" | "fallback";
 };
 
 export type DemoMemoryNodeDetail = DemoMemoryNode & {

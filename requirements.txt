@@ -4,18 +4,12 @@ psycopg[binary]==3.2.5  # Local Postgres client
 psycopg_pool==3.2.4  # Connection pooling
 
 # Viz API
-fastapi==0.110.1
+fastapi==0.128.0
 uvicorn[standard]==0.40.0
-fastmcp==2.14.3
+fastmcp==3.3.1
 
-# Explicit pins for vector + graph support
-chromadb==0.4.24
-neo4j==5.25.0
-
-# NVIDIA/OpenAI client
+# LLM + pgvector embedding client
 openai==2.15.0
-numpy==1.26.4
-google-auth==2.43.0
 
 # Development
 pytest==8.3.4  # Testing

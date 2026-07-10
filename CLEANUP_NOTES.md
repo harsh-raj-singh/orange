@@ -1,16 +1,24 @@
 # Cleanup Notes
 
-Orange now has one active memory architecture:
+Orange has one production memory architecture:
 
 ```text
-completed session -> triage -> scoped Insight extraction -> Neo4j + Chroma -> recall
+completed session
+-> durable Postgres job
+-> triage + scoped Insight extraction
+-> transactional Session/Insight/edge + pgvector write
+-> scoped recall and live graph-version refresh
 ```
 
-The retired Streamlit/Mem0/DSPy and Problem/Solution writer stack has been removed from runtime code and tests. The remaining cleanup candidates are narrower:
+Neo4j, Memgraph, Chroma, copied MCP bearer tokens, and their deployment scripts
+have been removed from the production path and dependencies.
 
-| Area | Notes |
-| --- | --- |
-| `core/storage/supabase_store.py` | Still named after Supabase, but implemented as a direct Postgres metadata/audit store. |
-| `core/graph_queries/neo4j_queries.py` | Generic graph reads remain for demo/MCP inspection; production admin auth should gate broad inspection routes. |
-| `site/src/components/memory-graph.tsx` | Contains a local static visualization fallback for offline demo rendering. |
-| `site/package-lock.json` | Keep Next dependency updates separate from this architecture cleanup. |
+The old fake Neo4j/Chroma writer/query modules remain temporarily as isolated
+test compatibility fixtures for historical regression coverage. No API, MCP,
+Slack, worker, or UI code imports them at runtime. They can be deleted together
+when those legacy regression tests are converted to repository-level fixtures.
+
+The static frontend graph is intentionally retained as a signed-out/offline
+product preview. Authenticated users never fall back from one identity to
+another user's live data; the last successful authorized snapshot is retained
+during a transient backend outage.

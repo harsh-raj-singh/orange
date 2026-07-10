@@ -1,199 +1,120 @@
-# Deploying Orange Backend to Railway
+# Deploying Orange
 
-The frontend is deployed separately on Vercel. Railway should deploy only the FastAPI backend from the repo root.
+Orange uses three managed pieces:
 
-## Backend Entry Point
+- Supabase Free: Postgres graph, pgvector embeddings, durable jobs, Auth/OAuth, and Realtime change rows.
+- Railway: FastAPI + remote MCP resource server + memory worker.
+- Vercel: Next.js UI, Supabase login/consent, and authenticated API proxy.
+
+Neo4j, Memgraph, Chroma, and a Railway data volume are not required.
+
+## 1. Supabase
+
+Link the intended project and apply every migration:
+
+```bash
+supabase link --project-ref your-project-ref
+supabase db push --linked --dry-run
+supabase db push --linked
+```
+
+The migrations create the private `orange` schema, the 1536-dimensional
+pgvector columns/indexes, scoped graph tables, RLS policies, leased jobs, graph
+version triggers, and Realtime publication entries.
+
+In Supabase Authentication:
+
+1. Use an asymmetric ES256 signing key.
+2. Set the site URL to the deployed Vercel origin.
+3. Allow the Vercel and local callback URLs.
+4. Enable OAuth Server and dynamic OAuth application registration.
+5. Set the authorization path to `/oauth/consent`.
+
+The OAuth discovery endpoint should respond successfully:
+
+```text
+https://your-project-ref.supabase.co/.well-known/oauth-authorization-server/auth/v1
+```
+
+## 2. Railway backend
+
+Railway uses `Dockerfile.railway` and this start command:
 
 ```bash
 uvicorn core.viz_api.main:app --host 0.0.0.0 --port ${PORT:-8000}
 ```
 
-Railway uses `Dockerfile.railway` and `requirements-railway.txt` so the backend deploy does not install the frontend or heavyweight local-only packages. The requirements file includes Slack Bot dependencies so the same image can also be reused by a separate Slack worker service.
+Set these variables once at the deployment level; end users never see or copy
+them:
 
-Railway uses `/health` as a lightweight health check:
-
-```json
-{"status":"ok","service":"orange-backend"}
+```text
+POSTGRES_DSN=postgresql://...?...sslmode=require
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_JWT_ALGORITHM=ES256
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5.4-nano
+ORANGE_PUBLIC_BACKEND_URL=https://your-backend.up.railway.app
+ORANGE_MEMORY_WRITE_MODE=queued
+ALLOWED_ORIGINS=https://your-site.vercel.app,http://localhost:3000,http://localhost:3004
 ```
 
-Use `/health/deep` when you want to verify Neo4j and Chroma connectivity after environment variables are set.
+`POSTGRES_DSN` is a server secret. Prefer the Supabase direct/session-pooler URL
+for this long-running process, keep SSL enabled, and never expose it through a
+`NEXT_PUBLIC_` variable.
 
-## Prerequisites
-
-- Railway account at railway.com
-- Railway CLI:
-
-```bash
-npm install -g @railway/cli
-railway login
-```
-
-## First Deploy
+Deploy and verify:
 
 ```bash
-railway init
 railway up
-railway domain
+curl https://your-backend.up.railway.app/health
+curl https://your-backend.up.railway.app/health/deep
 ```
 
-`railway domain` assigns a public URL, for example:
+The deep health response should report Postgres and pgvector as healthy.
+
+## 3. Vercel frontend
+
+Set these values on the `site` project for Production, Preview, and Development:
 
 ```text
-https://orange-backend.up.railway.app
+ORANGE_BACKEND_URL=https://your-backend.up.railway.app
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-browser-safe-publishable-key
 ```
 
-## Required Environment Variables
-
-Set these in Railway before using the demo ingestion flow:
-
-```bash
-railway variables set NEO4J_URI=bolt://your-neo4j-host:7687
-railway variables set NEO4J_USER=neo4j
-railway variables set NEO4J_PASSWORD=your-password
-railway variables set OPENAI_API_KEY=sk-...
-railway variables set OPENAI_MODEL=gpt-5.4-nano
-railway variables set ALLOWED_ORIGINS=https://site-sage-eta-18.vercel.app,http://localhost:3000,http://localhost:3004
-railway variables set ORANGE_MCP_SIGNING_SECRET=$(openssl rand -hex 32)
-railway variables set ORANGE_PUBLIC_BACKEND_URL=https://your-railway-url.up.railway.app
-railway variables set GOOGLE_CLIENT_ID=your-google-web-client-id.apps.googleusercontent.com
-```
-
-The code also supports the existing Memgraph-style names:
-
-```bash
-railway variables set MEMGRAPH_URL=bolt://your-graph-host:7687
-railway variables set MEMGRAPH_USERNAME=neo4j
-railway variables set MEMGRAPH_PASSWORD=your-password
-```
-
-If Supabase/Postgres metadata persistence is enabled, set one of these:
-
-```bash
-railway variables set SUPABASE_DB_URL=postgresql://...
-railway variables set POSTGRES_DSN=postgresql://...
-railway variables set DATABASE_URL=postgresql://...
-```
-
-Optional alternative LLM provider variables:
-
-```bash
-railway variables set NVIDIA_API_KEY=...
-railway variables set NVIDIA_MODEL=...
-railway variables set OPENAI_BASE_URL=...
-railway variables set NVIDIA_BASE_URL=...
-```
-
-## Optional Slack Recorder Service
-
-For the quickest production setup, the FastAPI service can also start the Slack Socket Mode bot in the background while keeping `/health` available for Railway:
-
-```bash
-railway variables set ENABLE_SLACK_BOT=true
-```
-
-Set these variables on the service:
-
-```bash
-railway variables set SLACK_BOT_TOKEN=xoxb-...
-railway variables set SLACK_SIGNING_SECRET=...
-railway variables set SLACK_APP_TOKEN=xapp-...
-railway variables set ORANGE_SLACK_COMPANY="Your Company Name"
-# Optional fallback if the Slack app does not have users:read.email yet:
-railway variables set ORANGE_SLACK_DEFAULT_USER_EMAIL=ranaharshraj3@gmail.com
-```
-
-Use the same Neo4j, Chroma, Postgres, and LLM variables as the FastAPI service. The Slack app needs slash commands for `/orange`, `/orange-stop`, and optionally `/orange-status`; it also needs `users:read.email` if you want private Slack notes to map to the same email-scoped user graph shown in Vercel.
-
-If the API and Slack bot need to scale independently later, split `python -m core.slack_bot` into a separate Railway worker service and keep the same environment variables there.
-
-## Chroma Persistence
-
-Orange currently uses `chromadb.PersistentClient`. Railway filesystems are ephemeral unless a volume is mounted, so this is the most important production setup detail.
-
-Use a Railway Volume mounted at:
-
-```text
-/data/chroma
-```
-
-Then set:
-
-```bash
-railway variables set CHROMA_PATH=/data/chroma
-```
-
-Without this volume, Chroma vectors can disappear on redeploy even though Neo4j nodes remain.
-
-## Neo4j Hosting
-
-Recommended: use Neo4j AuraDB Free at neo4j.com/aura. It is managed, reachable from Railway, and gives you a Bolt URI quickly.
-
-Set the Aura values in Railway:
-
-```bash
-railway variables set NEO4J_URI=neo4j+s://your-aura-host.databases.neo4j.io
-railway variables set NEO4J_USER=neo4j
-railway variables set NEO4J_PASSWORD=your-aura-password
-```
-
-Alternative: self-host Neo4j as a second Railway service, then point `NEO4J_URI` at that service.
-
-## Wire Railway to Vercel
-
-After Railway gives you the public backend URL, go to:
-
-```text
-Vercel dashboard -> orange/site project -> Settings -> Environment Variables
-```
-
-Add:
-
-```text
-ORANGE_BACKEND_URL=https://your-railway-url.up.railway.app
-```
-
-Then redeploy the frontend:
+Then deploy from `site/`:
 
 ```bash
 vercel --prod
 ```
 
-You can also trigger a redeploy from the Vercel dashboard.
+The site proxy forwards the signed-in user's short-lived Supabase access token
+to Railway. It does not forward a browser-supplied email as authorization.
 
-## Verify End to End
+## 4. Grok CLI OAuth test
 
-1. Check the backend:
-
-```bash
-curl https://your-railway-url.up.railway.app/health
-```
-
-Expected:
-
-```json
-{"status":"ok","service":"orange-backend"}
-```
-
-2. Check backing services:
+Add only Orange's MCP URL:
 
 ```bash
-curl https://your-railway-url.up.railway.app/health/deep
+grok mcp remove orange
+grok mcp add --scope user --transport http orange \
+  https://your-backend.up.railway.app/mcp
 ```
 
-Expected after Neo4j and Chroma are configured:
+Open Grok, run `/mcps`, select Orange, and press `i`. Grok performs discovery,
+dynamic client registration, PKCE, browser login, consent, token storage, and
+refresh. No bearer header or copied Supabase key is part of the user flow.
 
-```json
-{"neo4j":"ok","chroma":"ok","status":"healthy"}
-```
+After signing in:
 
-3. Open the frontend:
+1. Call `orange_status`.
+2. Store a non-trivial conversation.
+3. Poll `get_job_status` until it succeeds.
+4. Confirm the new node appears in the deployed graph within one refresh cycle.
+5. Restart Railway and confirm Grok reconnects without another token paste.
 
-```text
-https://site-sage-eta-18.vercel.app
-```
+## Optional Slack worker
 
-4. Complete a demo chat and mark it done.
-
-5. Refresh the page. Graph nodes should persist because the frontend is reading from Railway -> Neo4j/Chroma, not fallback memory.
-
-6. Check Vercel function logs. You should no longer see fallback warnings from the graph route.
+Set `ENABLE_SLACK_BOT=true` plus the Slack app secrets if the API service should
+also run the Socket Mode recorder. It uses the same Supabase Postgres store and
+worker path as MCP and the website.

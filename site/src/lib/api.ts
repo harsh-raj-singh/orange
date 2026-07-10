@@ -8,6 +8,7 @@ type BackendFallbackOptions<TBackend, TResult> = {
   request?: {
     method?: string;
     body?: unknown;
+    headers?: HeadersInit;
     signal?: AbortSignal;
     cache?: RequestCache;
     next?: {

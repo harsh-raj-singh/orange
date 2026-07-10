@@ -4,11 +4,14 @@ import { getDemoMemoryNodeDetail } from "@/lib/demo-memory-graph";
 import { backendJsonOrFallback, normalizeDemoGraphScope } from "@/lib/api";
 import type { DemoMemoryNodeDetail } from "@/lib/demo-memory-graph";
 import { transformBackendGraph, type BackendGraph } from "@/lib/orange-graph-transform";
+import { getVerifiedSupabaseSession } from "@/lib/supabase-server";
 
-export const revalidate = 30;
+export const dynamic = "force-dynamic";
 
-const GRAPH_CACHE_HEADERS = {
-  "Cache-Control": "s-maxage=30, stale-while-revalidate=60",
+const GRAPH_NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
 };
 
 type RouteContext = {
@@ -21,18 +24,30 @@ export async function GET(request: Request, context: RouteContext) {
   const { nodeId } = await context.params;
   const params = new URL(request.url).searchParams;
   const scope = normalizeDemoGraphScope(params.get("scope"));
-  const userEmail = params.get("user_email")?.trim().toLowerCase();
   const company = params.get("company")?.trim();
+  const auth = await getVerifiedSupabaseSession();
+
+  if (!auth) {
+    const previewNode = getDemoMemoryNodeDetail(nodeId);
+    return previewNode
+      ? NextResponse.json(previewNode, { headers: GRAPH_NO_STORE_HEADERS })
+      : NextResponse.json({ error: "Preview memory node not found" }, { status: 404 });
+  }
+
   const backendParams = new URLSearchParams({
     scope,
-    ...(userEmail ? { user_email: userEmail } : {}),
-    ...(userEmail ? { user_id: userEmail } : {}),
+    user_email: auth.email,
+    user_id: auth.userId,
     ...(company ? { company } : {}),
+    ...(company ? { org_id: company.toLowerCase() } : {}),
   });
 
   const node = await backendJsonOrFallback({
     path: `/graph/nodes/${encodeURIComponent(nodeId)}/neighborhood?${backendParams.toString()}`,
-    request: { next: { revalidate: 30, tags: [`memory-graph:${scope}`] } },
+    request: {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+    },
     warning: "orange_backend_node_failed",
     transform: (graph: BackendGraph): DemoMemoryNodeDetail | null => {
       const transformed = transformBackendGraph(graph, scope);
@@ -67,6 +82,6 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   return NextResponse.json(node, {
-    headers: GRAPH_CACHE_HEADERS,
+    headers: GRAPH_NO_STORE_HEADERS,
   });
 }

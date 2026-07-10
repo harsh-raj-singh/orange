@@ -70,10 +70,13 @@ type MemoryEdge = {
 type StoredPosition = { x: number; y: number };
 type MemoryFlowNode = Node<MemoryNode & { isNew?: boolean }, "memoryCard">;
 type MemoryFlowEdge = Edge<{ strength?: number; related?: boolean }>;
+type GraphSyncState = "live" | "stale" | "preview";
 
 const NODE_WIDTH = 188;
 const NODE_HEIGHT = 118;
 const STORAGE_PREFIX = "orange-memory-graph-positions:v2";
+const LIVE_POLL_INTERVAL_MS = 5_000;
+const RECOVERY_POLL_INTERVAL_MS = 15_000;
 
 const memoryNodes: MemoryNode[] = [
   {
@@ -253,41 +256,64 @@ function asNumber(value: unknown) {
 }
 
 function normalizeScope(value: unknown): MemoryScopeValue {
-  return value === "global" || value === "shared" ? "global" : "user";
+  const normalized = asString(value)?.trim().toLowerCase();
+  return normalized === "global" || normalized === "shared" || normalized === "company" ? "global" : "user";
 }
 
 function normalizeOutcome(value: unknown): InsightOutcomeValue | undefined {
-  return value === "resolved" || value === "exploratory" || value === "partial" || value === "abandoned"
-    ? value
+  const normalized = asString(value)?.trim().toLowerCase();
+  return normalized === "resolved" ||
+    normalized === "exploratory" ||
+    normalized === "partial" ||
+    normalized === "abandoned"
+    ? normalized
     : undefined;
 }
 
 function normalizeMemoryKind(value: unknown): MemoryKind {
-  return value === "technical_insight" ||
-    value === "user_fact" ||
-    value === "company_fact" ||
-    value === "preference" ||
-    value === "steering"
-    ? value
+  const normalized = asString(value)?.trim().toLowerCase();
+  return normalized === "technical_insight" ||
+    normalized === "user_fact" ||
+    normalized === "company_fact" ||
+    normalized === "preference" ||
+    normalized === "steering"
+    ? normalized
     : "unknown";
 }
 
 function normalizeKind(value: unknown): MemoryNode["kind"] {
-  const kind = asString(value);
+  const kind = asString(value)?.trim().toLowerCase();
+  const kinds: Record<string, MemoryNode["kind"]> = {
+    insight: "Insight",
+    problem: "Problem",
+    attempt: "Attempt",
+    solution: "Solution",
+    artifact: "Artifact",
+    concept: "Concept",
+    session: "Session",
+  };
+  return kind ? (kinds[kind] ?? "Concept") : "Concept";
+}
 
-  if (
-    kind === "Insight" ||
-    kind === "Problem" ||
-    kind === "Attempt" ||
-    kind === "Solution" ||
-    kind === "Artifact" ||
-    kind === "Concept" ||
-    kind === "Session"
-  ) {
-    return kind;
+function graphContextKey(scope: MemoryScopeFilter, userEmail: string, company: string) {
+  const userPart = scope === "global" ? "" : userEmail.trim().toLowerCase();
+  const companyPart = scope === "user" ? "" : company.trim().toLowerCase();
+  return `${scope}:${userPart}:${companyPart}`;
+}
+
+function graphSearchParams(scope: MemoryScopeFilter, userEmail: string, company: string) {
+  const params = new URLSearchParams({ scope });
+  if (scope !== "global" && userEmail) {
+    params.set("user_email", userEmail);
   }
+  if (scope !== "user" && company) {
+    params.set("company", company);
+  }
+  return params;
+}
 
-  return "Concept";
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function truncateLabel(value: string, maxLength = 36) {
@@ -316,11 +342,15 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
   const detail = isRecord(value.detail) ? value.detail : undefined;
   const metadata = isRecord(value.metadata)
     ? {
-        owner: asString(value.metadata.owner),
-        repo: asString(value.metadata.repo),
-        createdAt: asString(value.metadata.createdAt),
+        owner:
+          asString(value.metadata.owner) ??
+          asString(value.metadata.user_id) ??
+          asString(value.metadata.user_email) ??
+          asString(value.metadata.org_id),
+        repo: asString(value.metadata.repo) ?? asString(value.metadata.source),
+        createdAt: asString(value.metadata.createdAt) ?? asString(value.metadata.created_at),
         status: asString(value.metadata.status),
-        scope: normalizeScope(value.metadata.scope),
+        scope: normalizeScope(value.metadata.scope ?? value.metadata.visibility),
         outcome: normalizeOutcome(value.metadata.outcome),
         tags: asStringArray(value.metadata.tags),
         memoryKind: normalizeMemoryKind(value.metadata.memoryKind ?? value.metadata.memory_kind),
@@ -335,11 +365,15 @@ function normalizeNode(value: unknown, existing?: MemoryNode): MemoryNode | null
 
   return {
     id,
-    label: asString(value.label) ?? existing?.label ?? "Untitled memory",
+    label: asString(value.label) ?? asString(value.display_label) ?? existing?.label ?? "Untitled memory",
     kind: normalizeKind(value.kind ?? value.type ?? existing?.kind),
     x,
     y,
-    summary: asString(value.summary) ?? existing?.summary ?? "New memory node waiting for context.",
+    summary:
+      asString(value.summary) ??
+      asString(value.display_summary) ??
+      existing?.summary ??
+      "New memory node waiting for context.",
     score: asNumber(value.score) ?? existing?.score,
     metadata,
     detailTitle: asString(detail?.title) ?? existing?.detailTitle,
@@ -372,8 +406,8 @@ function normalizeEdge(value: unknown): MemoryEdge | null {
     id: asString(value.id) ?? `${source}-${target}`,
     source,
     target,
-    label: asString(value.label),
-    strength: asNumber(value.strength),
+    label: asString(value.label) ?? asString(value.type) ?? asString(value.relationship),
+    strength: asNumber(value.strength) ?? asNumber(value.similarity_score),
   };
 }
 
@@ -663,7 +697,7 @@ function MemoryGraphInner() {
     layoutNodes(visibleMemoryNodes, visibleFallbackEdges, readStoredPositions("user"), new Set()),
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [graphSource, setGraphSource] = useState<"backend" | "fallback">("fallback");
+  const [graphSyncState, setGraphSyncState] = useState<GraphSyncState>("preview");
   const [hasLoadedGraph, setHasLoadedGraph] = useState(false);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [introVisible, setIntroVisible] = useState(false);
@@ -697,15 +731,29 @@ function MemoryGraphInner() {
       return "";
     }
   });
+  const currentGraphContext = graphContextKey(scope, userEmail, company);
+  const currentGraphQuery = graphSearchParams(scope, userEmail, company).toString();
   const graphRef = useRef<HTMLDivElement>(null);
   const memoryNodeListRef = useRef(visibleMemoryNodes);
   const memoryEdgeListRef = useRef<MemoryEdge[]>(visibleFallbackEdges);
-  const seenNodeIdsRef = useRef(new Set(visibleMemoryNodes.map((node) => node.id)));
+  const flowNodesRef = useRef(flowNodes);
+  const activeGraphContextRef = useRef(currentGraphContext);
+  const renderedGraphContextRef = useRef(currentGraphContext);
+  const seenNodeIdsByContextRef = useRef(new Map<string, Set<string>>());
+  const liveSnapshotContextsRef = useRef(new Set<string>());
+  const liveGraphSnapshotsRef = useRef(
+    new Map<string, { nodes: MemoryNode[]; edges: MemoryEdge[] }>(),
+  );
+  const graphVersionsByContextRef = useRef(new Map<string, string>());
+  const graphFetchControllerRef = useRef<AbortController | null>(null);
+  const versionFetchControllerRef = useRef<AbortController | null>(null);
+  const detailFetchControllerRef = useRef<AbortController | null>(null);
+  const graphFetchSequenceRef = useRef(0);
   const isGraphVisibleRef = useRef(false);
   const hasRevealedGraphRef = useRef(false);
   const isDraggingRef = useRef(false);
-  const graphSourceRef = useRef<"backend" | "fallback">("fallback");
   const nextFallbackPollAtRef = useRef(0);
+  const isVersionCheckInFlightRef = useRef(false);
   const lastHydratedSignatureRef = useRef(
     graphHydrationSignature(visibleMemoryNodes, visibleFallbackEdges, "user"),
   );
@@ -738,21 +786,35 @@ function MemoryGraphInner() {
       nextEdges: MemoryEdge[],
       nextScope: MemoryScopeFilter,
       freshIds: Set<string> = new Set(),
+      nextGraphContext = currentGraphContext,
     ) => {
       if (isDraggingRef.current) {
         return;
       }
-      const signature = graphHydrationSignature(nextNodes, nextEdges, nextScope);
+      const signature = `${nextGraphContext}:${graphHydrationSignature(nextNodes, nextEdges, nextScope)}`;
       if (freshIds.size === 0 && lastHydratedSignatureRef.current === signature) {
         return;
       }
 
-      const storedPositions = readStoredPositions(nextScope);
+      const visibleNodeIds = new Set(nextNodes.map((node) => node.id));
+      const currentPositions =
+        renderedGraphContextRef.current === nextGraphContext
+          ? Object.fromEntries(
+              flowNodesRef.current
+                .filter((node) => visibleNodeIds.has(node.id))
+                .map((node) => [node.id, { x: node.position.x, y: node.position.y }]),
+            )
+          : {};
+      const storedPositions = {
+        ...readStoredPositions(nextScope),
+        ...currentPositions,
+      };
       lastHydratedSignatureRef.current = signature;
+      renderedGraphContextRef.current = nextGraphContext;
       setNodePositions(storedPositions);
       setFlowNodes(layoutNodes(nextNodes, nextEdges, storedPositions, freshIds));
     },
-    [setFlowNodes],
+    [currentGraphContext, setFlowNodes],
   );
 
   useEffect(() => {
@@ -764,19 +826,76 @@ function MemoryGraphInner() {
   }, [memoryEdgeList]);
 
   useEffect(() => {
+    flowNodesRef.current = flowNodes;
+  }, [flowNodes]);
+
+  useEffect(() => {
+    activeGraphContextRef.current = currentGraphContext;
+  }, [currentGraphContext]);
+
+  const prepareGraphContext = useCallback(
+    (nextScope: MemoryScopeFilter, nextUserEmail: string, nextCompany: string) => {
+      const nextContext = graphContextKey(nextScope, nextUserEmail, nextCompany);
+      if (nextContext === activeGraphContextRef.current) {
+        return;
+      }
+
+      activeGraphContextRef.current = nextContext;
+      graphFetchSequenceRef.current += 1;
+      graphFetchControllerRef.current?.abort();
+      versionFetchControllerRef.current?.abort();
+      detailFetchControllerRef.current?.abort();
+      graphFetchControllerRef.current = null;
+      versionFetchControllerRef.current = null;
+      detailFetchControllerRef.current = null;
+      isVersionCheckInFlightRef.current = false;
+      nextFallbackPollAtRef.current = 0;
+      isDraggingRef.current = false;
+
+      const cachedSnapshot = liveGraphSnapshotsRef.current.get(nextContext);
+      if (cachedSnapshot) {
+        memoryNodeListRef.current = cachedSnapshot.nodes;
+        memoryEdgeListRef.current = cachedSnapshot.edges;
+        setMemoryNodeList(cachedSnapshot.nodes);
+        setMemoryEdgeList(cachedSnapshot.edges);
+        setSelectedId(cachedSnapshot.nodes[0]?.id ?? "");
+        setHasLoadedGraph(true);
+        setGraphSyncState("stale");
+        hydrateFlowNodes(cachedSnapshot.nodes, cachedSnapshot.edges, nextScope, new Set(), nextContext);
+      } else {
+        memoryNodeListRef.current = [];
+        memoryEdgeListRef.current = [];
+        flowNodesRef.current = [];
+        renderedGraphContextRef.current = nextContext;
+        lastHydratedSignatureRef.current = `${nextContext}:${graphHydrationSignature([], [], nextScope)}`;
+        setMemoryNodeList([]);
+        setMemoryEdgeList([]);
+        setFlowNodes([]);
+        setNodePositions({});
+        setSelectedId("");
+        setHasLoadedGraph(false);
+        setGraphSyncState("preview");
+      }
+      setDetailLoadingId(null);
+      setIsRefreshing(false);
+    },
+    [hydrateFlowNodes, setFlowNodes],
+  );
+
+  useEffect(() => {
     function handleProfileUpdate() {
       try {
         const storedProfile = window.localStorage.getItem("orange-demo-profile");
-        if (storedProfile) {
-          const parsed = JSON.parse(storedProfile) as { email?: unknown; company?: unknown };
-          if (typeof parsed.email === "string") {
-            setUserEmail(parsed.email.trim().toLowerCase());
-          }
-          if (typeof parsed.company === "string") {
-            setCompany(parsed.company.trim());
-          }
-        }
+        const parsed = storedProfile
+          ? (JSON.parse(storedProfile) as { email?: unknown; company?: unknown })
+          : {};
+        const nextUserEmail = typeof parsed.email === "string" ? parsed.email.trim().toLowerCase() : "";
+        const nextCompany = typeof parsed.company === "string" ? parsed.company.trim() : "";
+        prepareGraphContext(scope, nextUserEmail, nextCompany);
+        setUserEmail(nextUserEmail);
+        setCompany(nextCompany);
       } catch {
+        prepareGraphContext(scope, "", "");
         setUserEmail("");
         setCompany("");
       }
@@ -784,61 +903,87 @@ function MemoryGraphInner() {
 
     window.addEventListener("orange-demo-profile-updated", handleProfileUpdate);
     return () => window.removeEventListener("orange-demo-profile-updated", handleProfileUpdate);
-  }, []);
+  }, [prepareGraphContext, scope]);
 
-  const fetchGraph = useCallback(async (showRefreshing = true, refresh = false) => {
+  const fetchGraph = useCallback(async (showRefreshing = true) => {
+    const requestContext = currentGraphContext;
+    const requestSequence = graphFetchSequenceRef.current + 1;
+    graphFetchSequenceRef.current = requestSequence;
+    graphFetchControllerRef.current?.abort();
+    const controller = new AbortController();
+    graphFetchControllerRef.current = controller;
+
     if (showRefreshing) {
       setIsRefreshing(true);
     }
 
     try {
-      const params = new URLSearchParams({ scope });
-      if (userEmail) {
-        params.set("user_email", userEmail);
-      }
-      if (company) {
-        params.set("company", company);
-      }
-      if (refresh) {
-        params.set("refresh", String(Date.now()));
-      }
-      const response = await fetch(`/api/demo/memory-graph?${params.toString()}`);
+      const response = await fetch(`/api/demo/memory-graph?${currentGraphQuery}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
 
       if (!response.ok) {
         throw new Error(`Graph request failed: ${response.status}`);
       }
 
       const graph: unknown = await response.json();
-
-      if (!isRecord(graph)) {
+      if (
+        !isRecord(graph) ||
+        requestSequence !== graphFetchSequenceRef.current ||
+        activeGraphContextRef.current !== requestContext
+      ) {
         return;
       }
-      const nextGraphSource = graph.source === "backend" ? "backend" : "fallback";
-      graphSourceRef.current = nextGraphSource;
-      nextFallbackPollAtRef.current = nextGraphSource === "fallback" ? Date.now() + 45_000 : 0;
-      setGraphSource(nextGraphSource);
+
+      const isLiveGraph = graph.source === "backend" || graph.source === "live";
+      const hasLiveSnapshot = liveSnapshotContextsRef.current.has(requestContext);
       setHasLoadedGraph(true);
 
-      const currentMemoryNodes = memoryNodeListRef.current;
-      const currentMemoryEdges = memoryEdgeListRef.current;
-      let freshIdSet = new Set<string>();
+      if (!isLiveGraph && hasLiveSnapshot) {
+        nextFallbackPollAtRef.current = Date.now() + RECOVERY_POLL_INTERVAL_MS;
+        setGraphSyncState("stale");
+        return;
+      }
+
+      if (isLiveGraph) {
+        liveSnapshotContextsRef.current.add(requestContext);
+        nextFallbackPollAtRef.current = Date.now() + RECOVERY_POLL_INTERVAL_MS;
+        setGraphSyncState("live");
+      } else {
+        nextFallbackPollAtRef.current = Date.now() + RECOVERY_POLL_INTERVAL_MS;
+        setGraphSyncState("preview");
+      }
+
+      const currentMemoryNodes =
+        renderedGraphContextRef.current === requestContext ? memoryNodeListRef.current : [];
+      const currentMemoryEdges =
+        renderedGraphContextRef.current === requestContext ? memoryEdgeListRef.current : [];
       const existingById = new Map(currentMemoryNodes.map((node) => [node.id, node]));
       const apiNodes = Array.isArray(graph.nodes)
         ? graph.nodes
             .map((node) => normalizeNode(node, isRecord(node) ? existingById.get(asString(node.id) ?? "") : undefined))
             .filter((node): node is MemoryNode => Boolean(node))
         : [];
-      const nextMemoryNodes =
-        apiNodes.length > 0 || graph.source === "backend"
-          ? apiNodes
-          : visibleMemoryNodes.filter((node) => nodeScope(node) === scope);
+      const fallbackNodes = visibleMemoryNodes.filter((node) => nodeScope(node) === scope);
+      const nextMemoryNodes = isLiveGraph ? apiNodes : fallbackNodes;
 
-      const freshIds = nextMemoryNodes
-        .map((node) => node.id)
-        .filter((id) => !seenNodeIdsRef.current.has(id));
-      freshIds.forEach((id) => seenNodeIdsRef.current.add(id));
-      if (freshIds.length > 0) {
-        freshIdSet = new Set(freshIds);
+      let freshIdSet = new Set<string>();
+      if (isLiveGraph) {
+        const seenIds = seenNodeIdsByContextRef.current.get(requestContext);
+        if (seenIds) {
+          const freshIds = nextMemoryNodes.map((node) => node.id).filter((id) => !seenIds.has(id));
+          freshIds.forEach((id) => seenIds.add(id));
+          freshIdSet = new Set(freshIds);
+        } else {
+          seenNodeIdsByContextRef.current.set(
+            requestContext,
+            new Set(nextMemoryNodes.map((node) => node.id)),
+          );
+        }
+      }
+
+      if (freshIdSet.size > 0) {
         window.setTimeout(() => {
           setFlowNodes((current) =>
             current.map((node) => ({
@@ -849,22 +994,23 @@ function MemoryGraphInner() {
         }, 600);
       }
 
-      if (!nextMemoryNodes.some((node) => node.id === selectedId)) {
-        setSelectedId(nextMemoryNodes[0]?.id ?? "");
-      }
+      setSelectedId((current) =>
+        nextMemoryNodes.some((node) => node.id === current) ? current : (nextMemoryNodes[0]?.id ?? ""),
+      );
 
-      let nextMemoryEdges = currentMemoryEdges;
-      if (Array.isArray(graph.edges)) {
-        const nextEdges = graph.edges.map(normalizeEdge).filter((edge): edge is MemoryEdge => Boolean(edge));
-        nextMemoryEdges =
-          nextEdges.length > 0 || graph.source === "backend"
-            ? nextEdges
-            : visibleFallbackEdges.filter((edge) => {
-                const scopedNodeIds = new Set(
-                  visibleMemoryNodes.filter((node) => nodeScope(node) === scope).map((node) => node.id),
-                );
-                return scopedNodeIds.has(edge.source) && scopedNodeIds.has(edge.target);
-              });
+      const apiEdges = Array.isArray(graph.edges)
+        ? graph.edges.map(normalizeEdge).filter((edge): edge is MemoryEdge => Boolean(edge))
+        : [];
+      const fallbackNodeIds = new Set(fallbackNodes.map((node) => node.id));
+      const fallbackGraphEdges = visibleFallbackEdges.filter(
+        (edge) => fallbackNodeIds.has(edge.source) && fallbackNodeIds.has(edge.target),
+      );
+      const nextMemoryEdges = isLiveGraph ? apiEdges : fallbackGraphEdges;
+      if (isLiveGraph) {
+        liveGraphSnapshotsRef.current.set(requestContext, {
+          nodes: nextMemoryNodes,
+          edges: nextMemoryEdges,
+        });
       }
 
       const currentSignature = graphHydrationSignature(currentMemoryNodes, currentMemoryEdges, scope);
@@ -875,41 +1021,155 @@ function MemoryGraphInner() {
         setMemoryNodeList(nextMemoryNodes);
         setMemoryEdgeList(nextMemoryEdges);
       }
-      hydrateFlowNodes(nextMemoryNodes, nextMemoryEdges, scope, freshIdSet);
+      hydrateFlowNodes(nextMemoryNodes, nextMemoryEdges, scope, freshIdSet, requestContext);
     } catch (error) {
-      console.warn("Unable to refresh memory graph", error);
+      if (!isAbortError(error)) {
+        if (
+          requestSequence === graphFetchSequenceRef.current &&
+          activeGraphContextRef.current === requestContext
+        ) {
+          setGraphSyncState(liveSnapshotContextsRef.current.has(requestContext) ? "stale" : "preview");
+        }
+        console.warn("Unable to refresh memory graph", error);
+      }
     } finally {
-      if (showRefreshing) {
-        setIsRefreshing(false);
+      if (requestSequence === graphFetchSequenceRef.current) {
+        graphFetchControllerRef.current = null;
+        if (showRefreshing) {
+          setIsRefreshing(false);
+        }
       }
     }
-  }, [company, hydrateFlowNodes, scope, selectedId, setFlowNodes, userEmail]);
+  }, [currentGraphContext, currentGraphQuery, hydrateFlowNodes, scope, setFlowNodes]);
+
+  const checkGraphVersion = useCallback(async () => {
+    if (isVersionCheckInFlightRef.current) {
+      return;
+    }
+    const requestContext = currentGraphContext;
+    const controller = new AbortController();
+    versionFetchControllerRef.current?.abort();
+    versionFetchControllerRef.current = controller;
+    isVersionCheckInFlightRef.current = true;
+
+    try {
+      const response = await fetch(`/api/demo/memory-graph/version?${currentGraphQuery}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Graph version request failed: ${response.status}`);
+      }
+
+      const payload: unknown = await response.json();
+      if (activeGraphContextRef.current !== requestContext) {
+        return;
+      }
+
+      const isLiveVersion =
+        isRecord(payload) && (payload.source === "backend" || payload.source === "live");
+      const version = isRecord(payload)
+        ? typeof payload.version === "string"
+          ? payload.version
+          : typeof payload.version === "number" && Number.isFinite(payload.version)
+            ? String(payload.version)
+            : undefined
+        : undefined;
+      if (!isLiveVersion || !version) {
+        if (liveSnapshotContextsRef.current.has(requestContext)) {
+          setGraphSyncState("stale");
+        }
+        if (Date.now() >= nextFallbackPollAtRef.current) {
+          nextFallbackPollAtRef.current = Date.now() + RECOVERY_POLL_INTERVAL_MS;
+          await fetchGraph(false);
+        }
+        return;
+      }
+
+      const previousVersion = graphVersionsByContextRef.current.get(requestContext);
+      graphVersionsByContextRef.current.set(requestContext, version);
+      if (!liveSnapshotContextsRef.current.has(requestContext)) {
+        await fetchGraph(false);
+      } else if (previousVersion && previousVersion !== version) {
+        await fetchGraph(false);
+      } else {
+        setGraphSyncState("live");
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        if (
+          activeGraphContextRef.current === requestContext &&
+          liveSnapshotContextsRef.current.has(requestContext)
+        ) {
+          setGraphSyncState("stale");
+        }
+        console.warn("Unable to check memory graph version", error);
+        if (
+          activeGraphContextRef.current === requestContext &&
+          Date.now() >= nextFallbackPollAtRef.current
+        ) {
+          nextFallbackPollAtRef.current = Date.now() + RECOVERY_POLL_INTERVAL_MS;
+          await fetchGraph(false);
+        }
+      }
+    } finally {
+      if (versionFetchControllerRef.current === controller) {
+        versionFetchControllerRef.current = null;
+        isVersionCheckInFlightRef.current = false;
+      }
+    }
+  }, [currentGraphContext, currentGraphQuery, fetchGraph]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => {
-      void fetchGraph(false);
+      void fetchGraph(false).then(() => checkGraphVersion());
     }, 0);
 
     const handleGraphUpdate = () => {
-      void fetchGraph(true, true);
+      graphVersionsByContextRef.current.delete(currentGraphContext);
+      void fetchGraph(true).then(() => checkGraphVersion());
+    };
+    const handleVisibilityOrFocus = () => {
+      if (
+        document.visibilityState === "visible" &&
+        isGraphVisibleRef.current &&
+        navigator.onLine !== false
+      ) {
+        void checkGraphVersion();
+      }
     };
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible" && isGraphVisibleRef.current) {
-        if (graphSourceRef.current === "fallback" && Date.now() < nextFallbackPollAtRef.current) {
-          return;
-        }
-        void fetchGraph();
+      if (
+        document.visibilityState === "visible" &&
+        isGraphVisibleRef.current &&
+        navigator.onLine !== false
+      ) {
+        void checkGraphVersion();
       }
-    }, 6000);
+    }, LIVE_POLL_INTERVAL_MS);
 
     window.addEventListener("orange-memory-graph-updated", handleGraphUpdate);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    window.addEventListener("online", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 
     return () => {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
+      graphFetchSequenceRef.current += 1;
+      graphFetchControllerRef.current?.abort();
+      versionFetchControllerRef.current?.abort();
+      detailFetchControllerRef.current?.abort();
+      graphFetchControllerRef.current = null;
+      versionFetchControllerRef.current = null;
+      detailFetchControllerRef.current = null;
+      isVersionCheckInFlightRef.current = false;
       window.removeEventListener("orange-memory-graph-updated", handleGraphUpdate);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      window.removeEventListener("online", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
     };
-  }, [fetchGraph]);
+  }, [checkGraphVersion, currentGraphContext, fetchGraph]);
 
   useEffect(() => {
     const graph = graphRef.current;
@@ -921,6 +1181,10 @@ function MemoryGraphInner() {
     const observer = new IntersectionObserver(
       ([entry]) => {
         isGraphVisibleRef.current = entry.isIntersecting;
+
+        if (entry.isIntersecting && document.visibilityState === "visible") {
+          void checkGraphVersion();
+        }
 
         if (entry.isIntersecting && !hasRevealedGraphRef.current) {
           hasRevealedGraphRef.current = true;
@@ -936,7 +1200,7 @@ function MemoryGraphInner() {
       isGraphVisibleRef.current = false;
       observer.disconnect();
     };
-  }, []);
+  }, [checkGraphVersion]);
 
   async function selectNode(node: MemoryNode) {
     setSelectedId(node.id);
@@ -946,16 +1210,16 @@ function MemoryGraphInner() {
     }
 
     setDetailLoadingId(node.id);
+    detailFetchControllerRef.current?.abort();
+    const controller = new AbortController();
+    const requestContext = currentGraphContext;
+    detailFetchControllerRef.current = controller;
 
     try {
-      const params = new URLSearchParams({ scope });
-      if (userEmail) {
-        params.set("user_email", userEmail);
-      }
-      if (company) {
-        params.set("company", company);
-      }
-      const response = await fetch(`/api/demo/memory-graph/${encodeURIComponent(node.id)}?${params.toString()}`);
+      const response = await fetch(
+        `/api/demo/memory-graph/${encodeURIComponent(node.id)}?${currentGraphQuery}`,
+        { cache: "no-store", signal: controller.signal },
+      );
 
       if (!response.ok) {
         throw new Error(`Node detail request failed: ${response.status}`);
@@ -963,13 +1227,29 @@ function MemoryGraphInner() {
 
       const detail = normalizeNode(await response.json(), node);
 
-      if (detail) {
-        setMemoryNodeList((current) => current.map((currentNode) => (currentNode.id === node.id ? detail : currentNode)));
+      if (detail && activeGraphContextRef.current === requestContext) {
+        setMemoryNodeList((current) => {
+          const next = current.map((currentNode) => (currentNode.id === node.id ? detail : currentNode));
+          memoryNodeListRef.current = next;
+          const cachedSnapshot = liveGraphSnapshotsRef.current.get(requestContext);
+          if (cachedSnapshot) {
+            liveGraphSnapshotsRef.current.set(requestContext, {
+              ...cachedSnapshot,
+              nodes: next,
+            });
+          }
+          return next;
+        });
       }
     } catch (error) {
-      console.warn("Unable to load memory node detail", error);
+      if (!isAbortError(error)) {
+        console.warn("Unable to load memory node detail", error);
+      }
     } finally {
-      setDetailLoadingId((current) => (current === node.id ? null : current));
+      if (detailFetchControllerRef.current === controller) {
+        detailFetchControllerRef.current = null;
+        setDetailLoadingId((current) => (current === node.id ? null : current));
+      }
     }
   }
 
@@ -990,17 +1270,8 @@ function MemoryGraphInner() {
                   : "text-[#5f746b] hover:text-[#24352d]"
               }`}
               onClick={() => {
+                prepareGraphContext(option.value, userEmail, company);
                 setScope(option.value);
-                const scopedNodes = visibleMemoryNodes.filter((node) => nodeScope(node) === option.value);
-                const scopedNodeIds = new Set(scopedNodes.map((node) => node.id));
-                const scopedEdges = visibleFallbackEdges.filter(
-                  (edge) => scopedNodeIds.has(edge.source) && scopedNodeIds.has(edge.target),
-                );
-                memoryNodeListRef.current = scopedNodes;
-                memoryEdgeListRef.current = scopedEdges;
-                setMemoryNodeList(scopedNodes);
-                setMemoryEdgeList(scopedEdges);
-                hydrateFlowNodes(scopedNodes, scopedEdges, option.value);
               }}
             >
               {option.label}
@@ -1061,11 +1332,20 @@ function MemoryGraphInner() {
             {memoryNodeList.length} nodes {isRefreshing ? "syncing" : "linked"}
           </p>
           <p
+            aria-live="polite"
             className={`mt-1 font-mono text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${
-              graphSource === "backend" ? "text-[#2f6f5e]" : "text-[#9f4218]"
+              graphSyncState === "live"
+                ? "text-[#2f6f5e]"
+                : graphSyncState === "stale"
+                  ? "text-[#9a5c16]"
+                  : "text-[#9f4218]"
             }`}
           >
-            {graphSource === "backend" ? "backend sync" : "demo fallback"}
+            {graphSyncState === "live"
+              ? "live storage sync"
+              : graphSyncState === "stale"
+                ? "reconnecting · last live view"
+                : "demo preview"}
           </p>
         </div>
       </div>

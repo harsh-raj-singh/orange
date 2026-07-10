@@ -1,17 +1,10 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-
 python-dotenv>=1.1.0,<2
-fastapi==0.110.1
+fastapi==0.128.0
 uvicorn[standard]==0.40.0
 pydantic>=2.6,<3
-fastmcp==2.14.3
-
-neo4j==5.25.0
-chromadb==0.4.24
-numpy==1.26.4
+fastmcp==3.3.1
 
 openai==2.15.0
-google-auth==2.43.0
 psycopg[binary]==3.2.5
 psycopg_pool==3.2.4
 slack-bolt==1.27.0

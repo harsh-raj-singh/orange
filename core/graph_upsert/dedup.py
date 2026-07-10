@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
-
 ORANGE_USER_VECTOR_COLLECTION = "orange_user_vectors"
 ORANGE_GLOBAL_VECTOR_COLLECTION = "orange_global_vectors"
 ORANGE_NODE_VECTOR_COLLECTION = ORANGE_USER_VECTOR_COLLECTION
-_EMBED_FN = DefaultEmbeddingFunction()
+_EMBED_FN: Any | None = None
 
 
 class _FallbackCollection:
@@ -29,6 +27,15 @@ def get_or_create_orange_collection(chroma: Any, *, scope: str = "user") -> Any:
         else ORANGE_USER_VECTOR_COLLECTION
     )
     if callable(getattr(chroma, "get_or_create_collection", None)):
+        global _EMBED_FN
+        if _EMBED_FN is None:
+            try:
+                from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Legacy Chroma access is unavailable; Orange now stores vectors in Supabase pgvector."
+                ) from exc
+            _EMBED_FN = DefaultEmbeddingFunction()
         return chroma.get_or_create_collection(
             collection_name,
             embedding_function=_EMBED_FN,

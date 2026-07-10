@@ -5,7 +5,7 @@ Called when user marks a chat as complete.
 Execution order:
 1. Triage Agent decides whether the completed session produced durable knowledge
 2. Insight Extractor reads the full session transcript
-3. upsert_insights writes unified Insight nodes to Neo4j + Chroma
+3. upsert_insights atomically writes graph rows and pgvector embeddings to Postgres
 """
 import asyncio
 import logging
@@ -156,13 +156,16 @@ async def _run_for_scope(
     scoped_transcript: str,
     scoped_user_id: str,
     scope: str,
-    neo4j_client: Any,
-    chroma_client: Any,
+    memory_repository: Any | None = None,
+    neo4j_client: Any | None = None,
+    chroma_client: Any | None = None,
     user_email: str | None = None,
     contributed_by: str | None = None,
     run_triage: bool = True,
     org_id: str | None = None,
     company: str | None = None,
+    auth_user_id: str | None = None,
+    source_ingestion_id: str | None = None,
 ) -> tuple[dict[str, int | str | None], list[str]]:
     scoped_errors: list[str] = []
     scoped_session_id = scoped_session.session_id
@@ -218,18 +221,35 @@ async def _run_for_scope(
     ]
 
     try:
-        summary = await asyncio.to_thread(
-            lambda: GraphUpsertEngine(neo4j=neo4j_client, chroma=chroma_client).upsert_insights(
+        if memory_repository is not None:
+            summary = await asyncio.to_thread(
+                memory_repository.upsert_insights,
                 session=session,
                 user_id=scoped_user_id,
                 insights=insights,
                 scope=scope,
                 user_email=user_email,
+                auth_user_id=auth_user_id,
                 contributed_by=contributed_by,
                 org_id=org_id,
                 company=company,
+                source_ingestion_id=source_ingestion_id,
             )
-        )
+        else:
+            # Compatibility for the legacy fake-writer unit tests. Production
+            # always supplies PostgresMemoryRepository.
+            summary = await asyncio.to_thread(
+                lambda: GraphUpsertEngine(neo4j=neo4j_client, chroma=chroma_client).upsert_insights(
+                    session=session,
+                    user_id=scoped_user_id,
+                    insights=insights,
+                    scope=scope,
+                    user_email=user_email,
+                    contributed_by=contributed_by,
+                    org_id=org_id,
+                    company=company,
+                )
+            )
     except Exception as exc:
         logger.error("upsert_insights_failed", extra={"session_id": scoped_session_id, "error": str(exc)})
         scoped_errors.append(f"Writer failed: {exc}")
@@ -269,8 +289,9 @@ async def run_extraction_pipeline(
     session_id: str,
     user_id: str,
     transcript: str,
-    neo4j_client: Any,
-    chroma_client: Any,
+    memory_repository: Any | None = None,
+    neo4j_client: Any | None = None,
+    chroma_client: Any | None = None,
     source: SourceType | str = SourceType.CURSOR,
     normalized_session: NormalizedSession | None = None,
     contribute_to_global: bool = True,
@@ -278,6 +299,7 @@ async def run_extraction_pipeline(
     known_pii: list[str] | None = None,
     force_worth_storing: bool = False,
     scope_override: str | None = None,
+    source_ingestion_id: str | None = None,
 ) -> dict:
     """
     Main pipeline. Call this when a chat is marked complete.
@@ -286,8 +308,7 @@ async def run_extraction_pipeline(
         session_id:      The chat_id from chat_sessions table
         user_id:         The user who owns this session
         transcript:      Full conversation text, formatted as 'Turn N [role]: message'
-        neo4j_client:    Neo4j driver instance
-        chroma_client:   Chroma client instance
+        memory_repository: transactional Postgres graph/vector repository
 
     Returns:
         dict with keys: insights_stored, skipped_reason, edges_written, errors
@@ -305,6 +326,7 @@ async def run_extraction_pipeline(
     transcript = normalized.transcript
     augmented_transcript = _augment_transcript_with_structured_context(transcript, normalized.metadata)
     org_id, company = _company_from_normalized(normalized)
+    auth_user_id = str(normalized.metadata.get("auth_user_id") or "").strip() or None
 
     global_summary: dict[str, int | str | None] | None = None
     triage = None
@@ -373,12 +395,15 @@ async def run_extraction_pipeline(
                 scoped_transcript=scrubbed_transcript,
                 scoped_user_id="global",
                 scope="global",
+                memory_repository=memory_repository,
                 neo4j_client=neo4j_client,
                 chroma_client=chroma_client,
                 contributed_by=normalized.user_email or normalized.user_id,
                 run_triage=False,
                 org_id=org_id,
                 company=company,
+                auth_user_id=auth_user_id,
+                source_ingestion_id=source_ingestion_id,
             )
 
     user_task = None
@@ -388,12 +413,15 @@ async def run_extraction_pipeline(
             scoped_transcript=augmented_transcript,
             scoped_user_id=user_id,
             scope="user",
+            memory_repository=memory_repository,
             neo4j_client=neo4j_client,
             chroma_client=chroma_client,
             user_email=normalized.user_email,
             run_triage=False,
             org_id=org_id,
             company=company,
+            auth_user_id=auth_user_id,
+            source_ingestion_id=source_ingestion_id,
         )
 
     if user_task is not None and global_task is not None:

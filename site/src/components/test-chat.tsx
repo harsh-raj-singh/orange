@@ -56,7 +56,6 @@ const profileFields: ReadonlyArray<{
   type?: string;
   multiline?: boolean;
 }> = [
-  { id: "email", label: "Email", placeholder: "avery@acme.com", type: "email" },
   { id: "company", label: "Company", placeholder: "Acme Cloud" },
 ];
 
@@ -115,28 +114,30 @@ function memoryChipClass(memoryNode: MemoryReference) {
     : "border-[#c5551c]/20 bg-[#fff8ec] text-[#8f3b14] hover:border-[#c5551c]";
 }
 
-export default function TestChat() {
+export default function TestChat({ authenticatedEmail }: { authenticatedEmail: string | null }) {
+  const verifiedEmail = authenticatedEmail?.trim().toLowerCase() ?? "";
   const [profile, setProfile] = useState<Profile>(() => {
+    const verifiedProfile = { ...emptyProfile, email: verifiedEmail };
+
     if (typeof window === "undefined") {
-      return emptyProfile;
+      return verifiedProfile;
     }
 
     try {
       const storedProfile = window.localStorage.getItem("orange-demo-profile");
       if (!storedProfile) {
-        return emptyProfile;
+        return verifiedProfile;
       }
       const parsed = JSON.parse(storedProfile) as Partial<Profile>;
       return {
-        ...emptyProfile,
-        email: typeof parsed.email === "string" ? parsed.email : "",
+        ...verifiedProfile,
         company: typeof parsed.company === "string" ? parsed.company : "",
         name: typeof parsed.name === "string" ? parsed.name : "",
         role: typeof parsed.role === "string" ? parsed.role : "",
         teamProject: typeof parsed.teamProject === "string" ? parsed.teamProject : "",
       };
     } catch {
-      return emptyProfile;
+      return verifiedProfile;
     }
   });
   const [contributeToGlobal, setContributeToGlobal] = useState(true);
@@ -150,8 +151,12 @@ export default function TestChat() {
   const [error, setError] = useState<string | null>(null);
   const [lastSavedCount, setLastSavedCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const authenticatedProfile = useMemo(
+    () => ({ ...profile, email: verifiedEmail }),
+    [profile, verifiedEmail],
+  );
   const latestRef = useRef({
-    profile,
+    profile: authenticatedProfile,
     messages,
     sessionId,
     lastSavedCount,
@@ -160,21 +165,21 @@ export default function TestChat() {
   });
 
   const isProfileReady = useMemo(
-    () => profile.email.trim().length > 0 && profile.company.trim().length > 0,
-    [profile],
+    () => verifiedEmail.length > 0 && profile.company.trim().length > 0,
+    [profile.company, verifiedEmail],
   );
   const hasUnsavedMessages = messages.length > lastSavedCount;
 
   useEffect(() => {
     latestRef.current = {
-      profile,
+      profile: authenticatedProfile,
       messages,
       sessionId,
       lastSavedCount,
       isProfileSubmitted,
       contributeToGlobal,
     };
-  }, [contributeToGlobal, isProfileSubmitted, lastSavedCount, messages, profile, sessionId]);
+  }, [authenticatedProfile, contributeToGlobal, isProfileSubmitted, lastSavedCount, messages, sessionId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -253,11 +258,11 @@ export default function TestChat() {
     event.preventDefault();
 
     if (!isProfileReady) {
-      setError("Add your email and company to start the demo.");
+      setError("Sign in and add your company to start the demo.");
       return;
     }
 
-    window.localStorage.setItem("orange-demo-profile", JSON.stringify(profile));
+    window.localStorage.setItem("orange-demo-profile", JSON.stringify(authenticatedProfile));
     window.dispatchEvent(new CustomEvent("orange-demo-profile-updated"));
     setError(null);
     setIsProfileSubmitted(true);
@@ -290,7 +295,7 @@ export default function TestChat() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          profile,
+          profile: authenticatedProfile,
           messages: nextMessages,
           sessionId,
           contribute_to_global: contributeToGlobal,
@@ -425,6 +430,28 @@ export default function TestChat() {
     }
   }
 
+  if (!verifiedEmail) {
+    return (
+      <section className="rounded-lg border border-[#24352d]/10 bg-white p-6 shadow-[0_24px_70px_rgba(36,53,45,0.10)] sm:p-8">
+        <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-[#c5551c]">
+          Account required
+        </p>
+        <h2 className="mt-3 text-2xl font-semibold text-[#161b18]">
+          Sign in to use your private memory.
+        </h2>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-[#536057]">
+          The graph above stays in safe preview mode until you sign in. Chat, recall, and saved conversations use your verified Supabase identity.
+        </p>
+        <a
+          href="/login?next=%2F%23try"
+          className="mt-6 inline-flex h-11 items-center justify-center rounded-md bg-[#24352d] px-5 text-sm font-bold text-white transition hover:bg-[#c5551c]"
+        >
+          Sign in securely
+        </a>
+      </section>
+    );
+  }
+
   if (!isProfileSubmitted) {
     return (
       <section className="rounded-lg border border-[#24352d]/10 bg-white p-5 shadow-[0_24px_70px_rgba(36,53,45,0.10)] sm:p-6">
@@ -435,10 +462,16 @@ export default function TestChat() {
             </p>
             <h2 className="mt-2 text-2xl font-semibold text-[#161b18]">Start a test session</h2>
           </div>
-          <p className="font-mono text-xs text-[#5f746b]">email and company required</p>
+          <p className="font-mono text-xs text-[#5f746b]">verified account · company required</p>
         </div>
 
         <form className="grid gap-4 md:grid-cols-2" onSubmit={submitProfile}>
+          <div>
+            <span className="text-sm font-semibold text-[#24352d]">Signed in as</span>
+            <div className="mt-2 flex h-11 items-center rounded-md border border-[#b9d4c7] bg-[#f1faf5] px-3 text-sm font-semibold text-[#2f6f5e]">
+              {verifiedEmail}
+            </div>
+          </div>
           {profileFields.map((field) => (
             <label htmlFor={`orange-${field.id}`} key={field.id}>
               <span className="text-sm font-semibold text-[#24352d]">{field.label}</span>
@@ -496,7 +529,7 @@ export default function TestChat() {
             Test chat
           </p>
           <h2 className="mt-1 text-xl font-semibold text-[#161b18]">
-            {profile.email} · {profile.company}
+            {verifiedEmail} · {profile.company}
           </h2>
         </div>
         <div className="flex flex-col items-start gap-2 sm:items-end">
@@ -535,7 +568,7 @@ export default function TestChat() {
             </div>
             <div>
               <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Email</dt>
-              <dd className="mt-1 font-semibold text-[#24352d]">{profile.email}</dd>
+              <dd className="mt-1 font-semibold text-[#24352d]">{verifiedEmail}</dd>
             </div>
             <div>
               <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Sharing</dt>
@@ -566,7 +599,7 @@ export default function TestChat() {
                     }`}
                   >
                     <p className="mb-1 font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#5f746b]">
-                      {message.role === "user" ? profile.email || "You" : "Orange"}
+                      {message.role === "user" ? verifiedEmail || "You" : "Orange"}
                     </p>
                     {message.role === "assistant" && message.memory?.length ? (
                       <div className="mb-2 flex flex-wrap gap-1.5">

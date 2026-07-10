@@ -291,6 +291,65 @@ def get_full_graph(
     return graph if include_raw else _without_raw_description(graph)
 
 
+def get_graph_version(
+    driver: Any,
+    user_id: str | None = None,
+    *,
+    scope: str = "both",
+    user_email: str | None = None,
+    org_id: str | None = None,
+) -> dict[str, Any]:
+    """Return a cheap scope-specific change token for live graph clients."""
+
+    requested_scope = scope if scope in {"user", "global", "both"} else "both"
+    normalized_user_email = (user_email or "").strip().lower() or None
+    normalized_user_id = (user_id or "").strip() or None
+    normalized_org_id = (org_id or "").strip().lower() or None
+    if requested_scope == "user" and not (normalized_user_email or normalized_user_id):
+        return {"version": "empty", "node_count": 0, "last_changed_at": None}
+    if requested_scope == "global" and not normalized_org_id:
+        return {"version": "empty", "node_count": 0, "last_changed_at": None}
+    if not (normalized_user_email or normalized_user_id or normalized_org_id):
+        return {"version": "empty", "node_count": 0, "last_changed_at": None}
+
+    rows = _run_query(
+        driver,
+        """
+        MATCH (n)
+        WHERE
+          (
+            $scope IN ['user', 'both']
+            AND n.scope = 'user'
+            AND (
+              ($user_email IS NOT NULL AND (n.user_email = $user_email OR n.user_id = $user_email))
+              OR ($user_id IS NOT NULL AND n.user_id = $user_id)
+            )
+          )
+          OR (
+            $scope IN ['global', 'both']
+            AND $org_id IS NOT NULL
+            AND n.scope = 'global'
+            AND n.org_id = $org_id
+          )
+        RETURN count(n) AS node_count,
+               toString(max(coalesce(n.updated_at, n.created_at, n.ingested_at, n.started_at))) AS last_changed_at
+        """,
+        scope=requested_scope,
+        user_email=normalized_user_email,
+        user_id=normalized_user_id,
+        org_id=normalized_org_id,
+    )
+    row = rows[0] if rows else {}
+    node_count = int(_record_get(row, "node_count", 0) or 0)
+    last_changed_at = _record_get(row, "last_changed_at")
+    clean_changed_at = str(last_changed_at) if last_changed_at else None
+    return {
+        "version": f"{node_count}:{clean_changed_at or 'none'}",
+        "node_count": node_count,
+        "last_changed_at": clean_changed_at,
+    }
+
+
 def get_node_with_neighborhood(driver: Any, node_id: str) -> dict[str, list[dict[str, Any]]]:
     rows = _run_query(
         driver,

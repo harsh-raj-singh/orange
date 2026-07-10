@@ -3,8 +3,8 @@ import Link from "next/link";
 import McpConnectCard from "@/components/mcp-connect-card";
 
 export const metadata = {
-  title: "Connect Orange MCP",
-  description: "Generate a desktop MCP setup for Codex or Claude Code.",
+  title: "Connect Orange to Grok CLI",
+  description: "Add Orange to Grok with one URL, then sign in securely in your browser.",
 };
 
 export default function McpPage() {
@@ -22,12 +22,12 @@ export default function McpPage() {
 
         <section className="flex flex-1 items-center py-16">
           <div className="w-full">
-            <p className="font-mono text-sm font-semibold uppercase text-[#f9a66b]">Desktop MCP setup</p>
+            <p className="font-mono text-sm font-semibold uppercase text-[#f9a66b]">Grok CLI · Remote MCP</p>
             <h1 className="mt-4 max-w-3xl text-5xl font-semibold leading-tight sm:text-6xl">
-              Connect Orange to Codex in under a minute.
+              One URL. One browser login. Orange is connected.
             </h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-[#cbd8cf]">
-              Sign in with Google, paste the config into Codex, and Orange will remember completed agent sessions under your verified email.
+              Add the hosted MCP server to Grok, open <span className="font-mono text-[#f9a66b]">/mcps</span>, and authenticate in your browser. No bearer tokens or environment variables required.
             </p>
             <div className="mt-10">
               <McpConnectCard />

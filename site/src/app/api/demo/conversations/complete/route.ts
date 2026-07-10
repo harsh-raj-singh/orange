@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import type { CompleteDemoConversationInput } from "@/lib/demo-memory-graph";
 import { orangeBackendFetch } from "@/lib/orange-backend";
+import { getVerifiedSupabaseSession } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,14 @@ async function readCompletionBody(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const auth = await getVerifiedSupabaseSession();
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Sign in before saving a conversation.", persisted: false },
+      { status: 401 },
+    );
+  }
+
   const body = await readCompletionBody(request);
 
   if (!body) {
@@ -31,12 +40,17 @@ export async function POST(request: Request) {
 
   const completionBody: CompleteDemoConversationInput = {
     ...body,
+    profile: {
+      ...body.profile,
+      email: auth.email,
+    },
     contribute_to_global: body.contribute_to_global ?? true,
   };
 
   try {
     const backendResult = await orangeBackendFetch<Record<string, unknown>>("/demo/complete", {
       method: "POST",
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
       body: completionBody,
     });
 

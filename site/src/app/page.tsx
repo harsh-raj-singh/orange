@@ -4,6 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 import GrainCanvas from "@/components/grain-canvas";
 import MemoryGraph from "@/components/memory-graph";
 import TestChat from "@/components/test-chat";
+import { getVerifiedSupabaseSession } from "@/lib/supabase-server";
 
 const heroWords = "Orange remembers how the work was solved.".split(" ");
 
@@ -60,8 +61,8 @@ const appConnections = [
     color: "#5E6AD2",
     path: "M 72 70 C 65 61 57 53 50 48",
     time: "ticket #OG-47",
-    prompt: "Neo4j index rebuild caused 3x slower recall on dense graphs",
-    body: "Workaround in branch `fix/graph-perf`",
+    prompt: "pgvector index tuning caused slower recall on a dense scope",
+    body: "HNSW filter/index fix recorded in branch `fix/graph-perf`",
   },
 ];
 
@@ -76,7 +77,7 @@ const contextBlocks = [
   },
   {
     title: "When the same bug returns in a different form",
-    body: "Vector search catches the semantic match. Neo4j brings back the cause, the fix, the file, and every follow-up that touched it.",
+    body: "pgvector catches the semantic match. The Postgres graph brings back the cause, the fix, the file, and every follow-up that touched it.",
   },
 ];
 
@@ -203,7 +204,9 @@ function IntegrationStrip() {
   );
 }
 
-export default function Home() {
+export default async function Home() {
+  const auth = await getVerifiedSupabaseSession();
+
   return (
     <main className="min-h-screen overflow-x-clip bg-[#0d1210] text-[#f7f3e8]">
       <header className="site-nav fixed inset-x-0 top-0 z-40">
@@ -231,9 +234,28 @@ export default function Home() {
               Connect
             </a>
           </div>
-          <a className="shimmer-button inline-flex h-10 items-center justify-center rounded-md bg-[#f26d21] px-4 text-sm font-bold text-white shadow-[0_14px_36px_rgba(242,109,33,0.28)] transition hover:scale-[1.02]" href="#try">
-            Try demo
-          </a>
+          {auth ? (
+            <div className="flex items-center gap-3">
+              <span className="hidden max-w-48 truncate text-xs text-[#b8c3ba] sm:block">
+                {auth.email}
+              </span>
+              <form action="/api/auth/sign-out" method="post">
+                <button
+                  type="submit"
+                  className="inline-flex h-10 items-center justify-center rounded-md border border-white/20 px-4 text-sm font-bold text-white transition hover:border-[#ff9f5f] hover:text-[#ffb777]"
+                >
+                  Sign out
+                </button>
+              </form>
+            </div>
+          ) : (
+            <a
+              className="shimmer-button inline-flex h-10 items-center justify-center rounded-md bg-[#f26d21] px-4 text-sm font-bold text-white shadow-[0_14px_36px_rgba(242,109,33,0.28)] transition hover:scale-[1.02]"
+              href="/login?next=%2F%23try"
+            >
+              Sign in
+            </a>
+          )}
         </nav>
       </header>
 
@@ -518,7 +540,7 @@ export default function Home() {
               Pick a handle, talk to the demo agent like you&apos;re debugging something real. When you end the session, watch Orange extract the key decisions, tag them by type, and write them into the shared graph. Anything discussed becomes retrievable by the next agent that walks into the same problem.
             </p>
           </div>
-          <TestChat />
+          <TestChat authenticatedEmail={auth?.email ?? null} />
         </div>
       </section>
 
