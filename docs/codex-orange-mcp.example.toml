@@ -1,20 +1,24 @@
-[mcp_servers.orange_remote]
-url = "https://orange-api-production.up.railway.app/mcp/"
-bearer_token_env_var = "ORANGE_MCP_TOKEN"
+# Codex / generic MCP client example for Orange.
+# One remote Streamable HTTP endpoint. Browser OAuth — no bearer token paste.
+
+[mcp_servers.orange]
+url = "https://orange-api-x38s.onrender.com/mcp"
 startup_timeout_sec = 20
 tool_timeout_sec = 180
 enabled = true
 
-# Generate ORANGE_MCP_TOKEN at:
-# https://site-sage-eta-18.vercel.app/mcp
+# Do not set a static Authorization header or ORANGE_MCP_TOKEN.
+# Compatible clients discover Supabase OAuth, register dynamically (DCR),
+# complete PKCE browser login, and store/refresh tokens themselves.
+# Connect UI: https://site-sage-eta-18.vercel.app/mcp
 
-[mcp_servers.orange]
+[mcp_servers.orange_local]
 command = "/absolute/path/to/orange/venv311/bin/python"
 args = ["-m", "core.mcp_server.server"]
 cwd = "/absolute/path/to/orange"
 startup_timeout_sec = 20
 tool_timeout_sec = 180
-enabled = true
+enabled = false
 
-[mcp_servers.orange.env]
+[mcp_servers.orange_local.env]
 PYTHONPATH = "/absolute/path/to/orange"

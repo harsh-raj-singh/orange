@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -11,6 +12,8 @@ from openai import AsyncOpenAI
 from core.agents.prompt_scope import active_extraction_prompt
 
 load_dotenv(override=True)
+
+logger = logging.getLogger(__name__)
 
 _CLIENT: AsyncOpenAI | None = None
 _CLIENT_SETTINGS: tuple[str, str | None] | None = None
@@ -132,10 +135,9 @@ async def call_llm_json(system_prompt: str, user_content: str) -> Any:
 
     last_exc: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
-        print(f"[LLM] attempt={attempt} caller='{caller_id}' starting", flush=True)
+        logger.info("llm_request_started", extra={"attempt": attempt, "caller": caller_id})
         t0 = time.time()
         try:
-            print(f"[LLM] attempt={attempt} sending request...", flush=True)
             request = {
                 "model": model,
                 "messages": [
@@ -160,22 +162,30 @@ async def call_llm_json(system_prompt: str, user_content: str) -> Any:
             raw_text = _content_to_text(response.choices[0].message.content)
             cleaned = _strip_code_fences(raw_text)
             result = _parse_llm_json(raw_text)
-            print(
-                f"[LLM] attempt={attempt} parsed ok total_wall={time.time()-t0:.1f}s",
-                flush=True,
+            logger.info(
+                "llm_request_succeeded",
+                extra={"attempt": attempt, "caller": caller_id, "duration_seconds": round(time.time() - t0, 3)},
             )
             return result
         except json.JSONDecodeError as exc:
-            print(
-                f"[LLM] attempt={attempt} JSON PARSE ERROR after {time.time()-t0:.1f}s",
-                flush=True,
+            logger.warning(
+                "llm_response_invalid_json",
+                extra={"attempt": attempt, "caller": caller_id, "duration_seconds": round(time.time() - t0, 3)},
             )
             last_exc = ValueError(f"LLM returned invalid JSON on attempt {attempt}.\nRaw:\n{cleaned}")
             if attempt == MAX_RETRIES:
                 break
             await _sleep_before_retry(attempt)
         except Exception as exc:  # noqa: BLE001
-            print(f"[LLM] attempt={attempt} ERROR after {time.time()-t0:.1f}s: {exc}", flush=True)
+            logger.warning(
+                "llm_request_failed",
+                extra={
+                    "attempt": attempt,
+                    "caller": caller_id,
+                    "duration_seconds": round(time.time() - t0, 3),
+                    "error": str(exc),
+                },
+            )
             last_exc = exc
             if attempt == MAX_RETRIES:
                 break

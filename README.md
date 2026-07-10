@@ -1,10 +1,11 @@
 # Orange Memory Fabric
 
-Orange is a memory fabric for developer and agentic workflows. It captures completed sessions from tools like Cursor, Claude Code, MCP, Slack-style chats, Gmail-style threads, and the demo chat, extracts durable memory, stores it in graph/vector form, and retrieves relevant past context when a similar session happens later.
+Orange is a memory fabric for developer and agentic workflows. It captures completed sessions from tools like Cursor, Claude Code, MCP, Slack recordings, and the demo chat, extracts durable memory, stores it in graph/vector form, and retrieves relevant past context when a similar session happens later.
 
 Live demo: [https://site-sage-eta-18.vercel.app](https://site-sage-eta-18.vercel.app)
 
-Backend API: [https://orange-api-production.up.railway.app](https://orange-api-production.up.railway.app)
+Backend API: Render Free web service (`orange-api` — see `DEPLOY.md` / `render.yaml`).
+Legacy Railway URL is retired after the trial expired.
 
 ## Core Loop
 
@@ -14,8 +15,8 @@ SessionIngestionRequest
 -> wait until the session is marked done
 -> triage whether anything is worth storing
 -> extract durable Insights
--> write Session + Insight graph nodes to Neo4j
--> write searchable vectors to Chroma
+-> atomically write Session + Insight + relationship rows to Supabase Postgres
+-> store searchable embeddings in pgvector
 -> retrieve prior context with recall_memory
 ```
 
@@ -27,14 +28,14 @@ capture session -> extract memory -> store graph/vector -> retrieve context late
 
 ## What It Does
 
-- Stores unified `Insight` nodes instead of separate Problem/Solution nodes for new writes.
+- Stores unified `Insight` nodes as the only active memory node type.
 - Runs extraction only when a user marks a conversation done.
 - Uses a Triage Agent to avoid storing generic or low-value chats.
 - Extracts engineering insights, user facts, company facts, preferences, and steering.
 - Keeps private user memory scoped by email.
 - Keeps shared company knowledge scoped by company/org so different companies do not connect.
-- Stores graph memory in Neo4j and semantic retrieval memory in Chroma.
-- Stores normalized sessions, messages, users, organizations, and memory jobs in Supabase/Postgres scaffolding.
+- Stores the graph, semantic vectors, normalized sessions, identities, and durable jobs in one Supabase Postgres database.
+- Publishes a cheap per-scope graph version so the deployed UI refreshes when MCP, Slack, or the website writes nodes.
 - Exposes retrieval and inspection through MCP tools and FastAPI routes.
 - Ships a polished Next.js demo site with chat, graph visualization, and source-app memory map.
 
@@ -75,32 +76,24 @@ Examples:
 - `core/agents/pii_scrubber/` cleans transcripts before company/shared extraction.
 - `core/agents/orchestrator.py` runs the completed-session pipeline.
 
-Legacy `issue_agent` and `solution_agent` folders are still present for reference and backwards compatibility, but the new completed-session pipeline writes `Insight` nodes.
+Older Problem/Solution extraction code has been retired. The completed-session pipeline writes `Insight` nodes directly.
 
 ### Persistence Layer
 
-- `core/graph_upsert/writer.py` writes `Session` and `Insight` nodes plus relationships into Neo4j.
-- `core/graph_upsert/embeddings.py` builds embedding strings for Chroma.
-- `core/graph_upsert/dedup.py` manages Chroma collections and similarity checks.
-- `core/storage/supabase_store.py` stores durable metadata in Supabase/Postgres when configured.
+- `core/storage/supabase_store.py` is the transactional Postgres graph repository.
+- `core/storage/embeddings.py` produces `text-embedding-3-small` vectors for pgvector.
+- `supabase/migrations/` defines scoped graph tables, ANN indexes, RLS, Realtime, and durable leased jobs.
 - `core/graph_schema_v2.py` defines graph-facing data models, including `Insight`.
 
-Current vector collections:
-
-```text
-orange_user_vectors
-orange_global_vectors
-```
-
-Company/shared vectors are scoped by company/org metadata so one company's graph does not bleed into another company's retrieval.
+Private and company embeddings share one indexed table but remain filtered by
+their user or organization owner, so one scope cannot bleed into another.
 
 ### Retrieval + Inspection
 
-- `core/mcp_server/server.py` exposes MCP tools such as `recall_memory`, `checkpoint_context`, `store_session`, `inspect_graph`, `get_node`, and `chroma_peek`.
+- `core/mcp_server/server.py` exposes OAuth-protected MCP tools such as `recall_memory`, `checkpoint_context`, `complete_conversation`, `get_job_status`, `inspect_graph`, and `get_node`.
 - `core/mcp_server/handlers.py` contains the MCP tool handlers and retrieval logic.
 - `core/viz_api/routes/demo.py` exposes demo-facing `POST /demo/complete` and `POST /demo/recall_memory`.
 - `core/viz_api/routes/graph.py` serves graph read endpoints used by the demo.
-- `core/viz_api/routes/chroma.py` serves vector-store inspection endpoints.
 - `core/viz_api/routes/health.py` provides lightweight and deep health checks.
 
 ### Frontend Demo
@@ -138,6 +131,8 @@ It includes:
 ├── supabase/
 ├── tests/
 ├── DEPLOY.md
+├── render.yaml
+├── Dockerfile.railway
 ├── railway.toml
 └── requirements.txt
 ```
@@ -167,13 +162,10 @@ Important variables:
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
-- `NEO4J_URI`
-- optional `FRONTEND_NEO4J_URI` for `orange_status` frontend/backend Neo4j alignment checks
-- `NEO4J_USER`
-- `NEO4J_PASSWORD`
-- `CHROMA_PATH`
+- `POSTGRES_DSN`
+- `SUPABASE_URL`
+- `SUPABASE_JWT_ALGORITHM=ES256`
 - `ALLOWED_ORIGINS`
-- optional `SUPABASE_DB_URL` or `POSTGRES_DSN`
 - optional `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN`
 
 For local frontend-to-backend calls, set:
@@ -182,7 +174,7 @@ For local frontend-to-backend calls, set:
 ORANGE_BACKEND_URL=http://localhost:8001
 ```
 
-For Vercel production, `ORANGE_BACKEND_URL` should point at the Railway backend.
+For Vercel production, `ORANGE_BACKEND_URL` should point at the Render backend.
 
 ## Running Locally
 
@@ -197,9 +189,7 @@ Useful endpoints:
 - `GET /health`
 - `GET /health/deep`
 - `GET /graph/full`
-- `GET /graph/nodes`
-- `GET /chroma/status`
-- `GET /chroma/peek?limit=5`
+- `GET /graph/nodes/{node_id}/neighborhood`
 - `POST /demo/complete`
 - `POST /demo/recall_memory`
 
@@ -224,34 +214,46 @@ PYTHONPATH=. python -m core.mcp_server.server
 ```
 
 This runs Orange in stdio mode for MCP-compatible clients.
-See [`docs/MCP.md`](docs/MCP.md) for Claude Code and Codex setup snippets.
+See [`docs/MCP.md`](docs/MCP.md) for provider-neutral setup (Grok, Claude,
+ChatGPT, and generic MCP clients). One remote URL is used for every client.
 
 ## MCP Tools
 
 The MCP server currently exposes:
 
-- `orange_status`
-- `recall_memory`
-- `checkpoint_context`
-- `complete_conversation`
-- `store_session`
-- `resolve_problem`
-- `inspect_graph`
-- `get_node`
-- `get_session_graph`
-- `list_sessions`
-- `chroma_peek`
+- `orange_status` (read-only)
+- `recall_memory` (read-only)
+- `checkpoint_context` (non-destructive write)
+- `complete_conversation` (non-destructive write)
+- `store_session` (non-destructive write)
+- `inspect_graph` (read-only)
+- `get_node` (read-only)
+- `get_session_graph` (read-only)
+- `list_sessions` (read-only)
+- `get_job_status` (read-only)
+- `memory_peek` (read-only)
 
-For coding agents, the happy path is `recall_memory` before answering, `checkpoint_context` when important mid-session context should be preserved, and `complete_conversation` once when the session is done. `resolve_problem` remains for compatibility; the current memory write path is session-level Insight extraction.
+For coding agents, the happy path is `recall_memory` before answering, `checkpoint_context` when important mid-session context should be preserved, and `complete_conversation` once when the session is done. Nodes written through any MCP client bump the scoped graph version so the UI refreshes automatically.
 
-Desktop setup page:
+Desktop setup page (**Connect Orange**):
 
 ```text
 https://site-sage-eta-18.vercel.app/mcp
 ```
 
-This page mints a personal signed MCP token and shows copyable Codex/Claude Code setup snippets.
-Users sign in with Google first; Orange verifies the Google ID token and scopes the MCP token to that email.
+One Streamable HTTP URL for Grok CLI, Claude Code / Claude.ai, ChatGPT, and
+generic MCP clients. Browser OAuth (discovery, PKCE, dynamic client
+registration) stores and refreshes credentials in the client. Users do not copy
+API keys, bearer tokens, or headers.
+
+```bash
+python scripts/configure_mcp.py grok remote
+# defaults to orange-remote; --name before remote if overriding:
+# python scripts/configure_mcp.py grok --name orange-remote remote
+python scripts/configure_mcp.py claude
+python scripts/configure_mcp.py chatgpt   # ChatGPT Developer mode App, not Custom GPT Actions
+python scripts/configure_mcp.py generic
+```
 
 ## Deployed Demo
 
@@ -264,16 +266,21 @@ https://site-sage-eta-18.vercel.app
 Backend:
 
 ```text
-https://orange-api-production.up.railway.app
+https://orange-api-x38s.onrender.com
 ```
 
-The Vercel site calls the Railway backend through `ORANGE_BACKEND_URL`. If that variable is absent, the demo graph can fall back to in-memory demo data, but real persistence requires Railway + Neo4j + Chroma.
+(Replace with your Render service hostname after the first deploy.)
 
-See `DEPLOY.md` for Railway/Vercel setup details, including Chroma volume persistence.
+The Vercel site calls Render through `ORANGE_BACKEND_URL` and forwards the
+signed-in user's Supabase access token. Signed-out visitors may see preview data;
+real user memory is never selected by an unverified browser email.
+
+See `DEPLOY.md` for Supabase/Render/Vercel setup and the provider-neutral MCP
+OAuth smoke test (Grok → Claude → ChatGPT).
 
 ## Supabase Schema
 
-Orange keeps durable metadata separate from the graph/vector stores. The Supabase migration in `supabase/migrations/` creates a private `orange` schema with:
+Orange keeps the entire durable memory path in the private Supabase `orange` schema:
 
 - `organizations`
 - `users`
@@ -282,15 +289,20 @@ Orange keeps durable metadata separate from the graph/vector stores. The Supabas
 - `session_ingestions`
 - `session_messages`
 - `memory_write_jobs`
+- `memory_sessions`
+- `insights` (including pgvector embeddings)
+- `memory_edges`
+- `graph_scope_versions`
 
-The schema enables RLS and revokes browser-facing `anon`/`authenticated` access. Use server-side database credentials for this path until product-facing policies are intentionally designed.
+The backend owns writes. Authenticated reads are protected by RLS and verified
+Supabase identity/organization membership.
 
 ## Testing
 
-Focused checks used during current development:
+Backend checks:
 
 ```bash
-PYTHONPATH=. pytest tests/test_insight_pipeline.py tests/test_mcp_handlers.py tests/test_graph_upsert_v2_writer.py tests/test_ingestion_normalization.py
+PYTHONPATH=. pytest -q tests
 ```
 
 Frontend checks:
@@ -301,22 +313,17 @@ npm run lint
 npm run build
 ```
 
-Full pytest is not fully clean yet because some legacy tests still import older modules or run live pipeline work during collection.
-
 ## Security Notes
 
 - Do not commit secrets.
-- `.env`, local databases, Chroma stores, generated inspection exports, and local app artifacts should stay ignored.
+- `.env`, local databases, generated inspection exports, and local app artifacts should stay ignored.
 - Shared/company memory must not expose contributor emails or private user details.
 - Global/company retrieval must remain scoped by company/org identity.
 - Use `.env.example` as the local configuration template.
 
-## Roadmap-Friendly Areas
+## Next Areas
 
-- Make `store_session` async with `memory_write_jobs`
-- Add `get_job_status(job_id)`
-- Tighten auth and user identity before real org usage
-- Improve extraction observability and benchmarks
-- Clean or delete legacy tests/imports
-- Expand source connectors beyond the demo UI
-- Improve company-scoped graph persistence and admin inspection
+- Add organization invitation/admin workflows around the existing membership checks.
+- Add extraction-quality benchmarks and long-term pgvector recall evaluation.
+- Expand source connectors beyond MCP, Slack, and the demo UI.
+- Add an admin-only dead-letter job replay surface.

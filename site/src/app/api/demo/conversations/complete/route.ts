@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 
-import {
-  completeDemoConversation,
-  type CompleteDemoConversationInput,
-} from "@/lib/demo-memory-store";
-import { backendJsonOrFallback } from "@/lib/api";
+import type { CompleteDemoConversationInput } from "@/lib/demo-memory-graph";
+import { orangeBackendFetch } from "@/lib/orange-backend";
+import { getVerifiedSupabaseSession } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +21,14 @@ async function readCompletionBody(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const auth = await getVerifiedSupabaseSession();
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Sign in before saving a conversation.", persisted: false },
+      { status: 401 },
+    );
+  }
+
   const body = await readCompletionBody(request);
 
   if (!body) {
@@ -34,27 +40,42 @@ export async function POST(request: Request) {
 
   const completionBody: CompleteDemoConversationInput = {
     ...body,
+    profile: {
+      ...body.profile,
+      email: auth.email,
+    },
     contribute_to_global: body.contribute_to_global ?? true,
   };
 
-  return NextResponse.json(
-    await backendJsonOrFallback<Record<string, unknown>, Record<string, unknown>>({
-      path: "/demo/complete",
-      request: {
-        method: "POST",
-        body: completionBody,
-      },
-      warning: "orange_backend_completion_failed",
-      transform: (backendResult) => ({
-        ...backendResult,
-        persisted: true,
-        fallback: false,
-      }),
-      fallback: () => ({
-        ...completeDemoConversation(completionBody),
+  try {
+    const backendResult = await orangeBackendFetch<Record<string, unknown>>("/demo/complete", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+      body: completionBody,
+    });
+
+    if (!backendResult) {
+      return NextResponse.json(
+        {
+          error: "Orange backend is not configured; completion was not persisted.",
+          persisted: false,
+        },
+        { status: 503 },
+      );
+    }
+
+    return NextResponse.json({
+      ...backendResult,
+      persisted: true,
+      source: "backend",
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Orange backend completion failed.",
         persisted: false,
-        fallback: true,
-      }),
-    }),
-  );
+      },
+      { status: 503 },
+    );
+  }
 }

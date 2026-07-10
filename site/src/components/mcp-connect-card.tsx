@@ -1,49 +1,163 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 
-type ConnectResponse = {
-  email: string;
-  name?: string | null;
-  token: string;
-  mcp_url: string;
-  codex_config: string;
-  codex_command: string;
-  claude_command: string;
-};
+const ORANGE_MCP_URL = (
+  process.env.NEXT_PUBLIC_ORANGE_MCP_URL ||
+  (process.env.NEXT_PUBLIC_ORANGE_BACKEND_URL
+    ? `${process.env.NEXT_PUBLIC_ORANGE_BACKEND_URL.replace(/\/$/, "")}/mcp`
+    : "https://orange-api-x38s.onrender.com/mcp")
+).replace(/\/$/, "");
 
-type GoogleCredentialResponse = {
-  credential?: string;
-};
+type ClientTab = "grok" | "claude" | "chatgpt" | "generic";
 
-declare global {
-  interface Window {
-    google?: {
-      accounts?: {
-        id?: {
-          initialize: (config: {
-            client_id: string;
-            callback: (response: GoogleCredentialResponse) => void;
-            ux_mode?: "popup" | "redirect";
-          }) => void;
-          renderButton: (
-            element: HTMLElement,
-            options: {
-              theme?: "outline" | "filled_blue" | "filled_black";
-              size?: "large" | "medium" | "small";
-              type?: "standard" | "icon";
-              shape?: "rectangular" | "pill" | "circle" | "square";
-              text?: "signin_with" | "signup_with" | "continue_with" | "signin";
-              width?: number;
-            },
-          ) => void;
-        };
-      };
-    };
+const TABS: { id: ClientTab; label: string }[] = [
+  { id: "grok", label: "Grok CLI" },
+  { id: "claude", label: "Claude" },
+  { id: "chatgpt", label: "ChatGPT" },
+  { id: "generic", label: "Other clients" },
+];
+
+const CLIENT_SETUP: Record<
+  ClientTab,
+  {
+    summary: string;
+    commands: { label: string; value: string }[];
+    steps: { title: string; body: string }[];
+    tip: string;
   }
-}
-
-const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+> = {
+  grok: {
+    summary:
+      "Add Orange as a separate remote server, then authenticate once in Grok. Your existing local server stays untouched.",
+    commands: [
+      {
+        label: "Run in your terminal",
+        value: `grok mcp add --scope user --transport http orange-remote ${ORANGE_MCP_URL}`,
+      },
+      {
+        label: "Verify after sign-in",
+        value: "grok mcp doctor orange-remote --json",
+      },
+    ],
+    steps: [
+      {
+        title: "Add the remote server",
+        body: "Run the command above. It registers the shared Orange endpoint as orange-remote.",
+      },
+      {
+        title: "Authenticate in Grok",
+        body: "Open /mcps, choose orange-remote, and press i. Grok opens the Orange sign-in page.",
+      },
+      {
+        title: "Confirm the connection",
+        body: "Return to Grok and ask it to call orange_status. A healthy connection exposes 11 tools.",
+      },
+    ],
+    tip: "Keep the name orange-remote while testing. Rename it only after browser login and a memory write both succeed.",
+  },
+  claude: {
+    summary:
+      "Claude Code and Claude.ai use the same endpoint and the same per-user browser sign-in.",
+    commands: [
+      {
+        label: "Claude Code",
+        value: `claude mcp add --transport http orange ${ORANGE_MCP_URL}`,
+      },
+      {
+        label: ".mcp.json fragment",
+        value: `{
+  "mcpServers": {
+    "orange": {
+      "type": "http",
+      "url": "${ORANGE_MCP_URL}"
+    }
+  }
+}`,
+      },
+    ],
+    steps: [
+      {
+        title: "Add Orange",
+        body: "Run the Claude Code command, or add the JSON block to your project MCP configuration.",
+      },
+      {
+        title: "Connect your account",
+        body: "Open /mcp in Claude Code and complete the Orange browser sign-in when prompted.",
+      },
+      {
+        title: "Test one recall",
+        body: "Ask Claude to call orange_status, then recall_memory for the task you are about to start.",
+      },
+    ],
+    tip: "In Claude.ai, add the URL under Customize → Connectors → Add custom connector. Leave client credentials empty unless your workspace requires them.",
+  },
+  chatgpt: {
+    summary:
+      "Add Orange as a developer-mode App. ChatGPT scans the MCP tools and sends you through the same Orange sign-in.",
+    commands: [
+      {
+        label: "Paste this MCP URL",
+        value: ORANGE_MCP_URL,
+      },
+    ],
+    steps: [
+      {
+        title: "Enable Developer mode",
+        body: "In ChatGPT web, open Settings → Security and login and enable Developer mode.",
+      },
+      {
+        title: "Create the Orange app",
+        body: "Open Settings → Plugins/Apps, create a developer-mode app, and paste the URL above.",
+      },
+      {
+        title: "Scan and sign in",
+        body: "Choose OAuth, scan tools, complete Orange sign-in, and create the app. Then enable Orange from the chat composer.",
+      },
+    ],
+    tip: "Orange is an MCP app, not a Custom GPT Action. ChatGPT may ask for confirmation before write tools save memory.",
+  },
+  generic: {
+    summary:
+      "Any client that supports Streamable HTTP and MCP OAuth can connect without an Orange-specific plugin.",
+    commands: [
+      {
+        label: "MCP URL",
+        value: ORANGE_MCP_URL,
+      },
+      {
+        label: "Config fragment",
+        value: `{
+  "mcpServers": {
+    "orange": {
+      "type": "http",
+      "url": "${ORANGE_MCP_URL}"
+    }
+  }
+}`,
+      },
+      {
+        label: "Discovery check",
+        value: `curl ${ORANGE_MCP_URL.replace(/\/mcp$/, "")}/.well-known/oauth-protected-resource/mcp`,
+      },
+    ],
+    steps: [
+      {
+        title: "Add the endpoint",
+        body: "Configure an HTTP or streamable-http MCP server using the Orange URL only.",
+      },
+      {
+        title: "Complete sign-in",
+        body: "A compatible client discovers OAuth automatically and opens the Orange login page.",
+      },
+      {
+        title: "Verify the tools",
+        body: "Call orange_status. Orange uses the verified account—not a client-supplied email—to scope private memory.",
+      },
+    ],
+    tip: "If your client asks for a static token instead of opening a browser, it does not support Orange’s remote OAuth flow yet.",
+  },
+};
 
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -70,7 +184,7 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-[#f9a66b]">{label}</p>
         <CopyButton value={value} />
       </div>
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-[#dbe7df]">
+      <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-[#dbe7df]">
         {value}
       </pre>
     </div>
@@ -78,139 +192,105 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
 }
 
 export default function McpConnectCard() {
-  const googleButtonRef = useRef<HTMLDivElement | null>(null);
-  const initializedRef = useRef(false);
-  const [data, setData] = useState<ConnectResponse | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const configPath = useMemo(() => "~/.codex/config.toml", []);
-
-  useEffect(() => {
-    if (!GOOGLE_CLIENT_ID || initializedRef.current) {
-      return;
-    }
-
-    const setupGoogleButton = () => {
-      if (!window.google?.accounts?.id || !googleButtonRef.current || initializedRef.current) {
-        return;
-      }
-      initializedRef.current = true;
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        ux_mode: "popup",
-        callback: async (response) => {
-          if (!response.credential) {
-            setError("Google did not return a sign-in credential.");
-            return;
-          }
-          setLoading(true);
-          setError("");
-          setData(null);
-          try {
-            const connectResponse = await fetch("/api/mcp/connect", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ credential: response.credential }),
-            });
-            const result = await connectResponse.json();
-            if (!connectResponse.ok) {
-              throw new Error(result.error || "Could not connect Orange MCP.");
-            }
-            setData(result as ConnectResponse);
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Could not connect Orange MCP.");
-          } finally {
-            setLoading(false);
-          }
-        },
-      });
-      window.google.accounts.id.renderButton(googleButtonRef.current, {
-        theme: "filled_black",
-        size: "large",
-        type: "standard",
-        shape: "rectangular",
-        text: "continue_with",
-        width: 280,
-      });
-    };
-
-    if (window.google?.accounts?.id) {
-      setupGoogleButton();
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = setupGoogleButton;
-    script.onerror = () => setError("Could not load Google sign-in. Check NEXT_PUBLIC_GOOGLE_CLIENT_ID.");
-    document.head.appendChild(script);
-
-    return () => {
-      script.remove();
-    };
-  }, []);
+  const [tab, setTab] = useState<ClientTab>("grok");
+  const setup = CLIENT_SETUP[tab];
 
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.05] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.28)]">
-      <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-white">Sign in to enable Orange MCP</p>
-            <p className="mt-1 text-sm leading-6 text-[#cbd8cf]">
-              Orange uses your verified Google email as your private memory identity.
-            </p>
-          </div>
-          <div className="min-h-10 min-w-[280px]">
-            {GOOGLE_CLIENT_ID ? (
-              <div ref={googleButtonRef} />
-            ) : (
-              <div className="rounded-md border border-[#ffb4a8]/30 bg-[#ffb4a8]/10 px-4 py-3 text-sm text-[#ffddd7]">
-                Google Client ID is not configured.
-              </div>
-            )}
-          </div>
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#101713]/90 shadow-[0_30px_100px_rgba(0,0,0,0.34)]">
+      <div className="flex flex-col gap-4 border-b border-white/10 bg-[linear-gradient(120deg,rgba(249,115,22,0.12),rgba(98,212,156,0.05))] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-7">
+        <div>
+          <p className="text-lg font-semibold text-white">One endpoint, one account, the same memory everywhere.</p>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-[#cbd8cf]">
+            Choose your client below. You will add the URL, sign in in your browser, and verify the connection with one tool call.
+          </p>
         </div>
+        <span className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-emerald-200/20 bg-emerald-200/10 px-3 py-1.5 font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-emerald-100">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> No keys to copy
+        </span>
       </div>
 
-      {loading ? <p className="mt-4 text-sm text-[#ffe3cf]">Verifying Google sign-in...</p> : null}
-      {error ? <p className="mt-4 text-sm text-[#ffb4a8]">{error}</p> : null}
+      <div className="px-5 pt-5 sm:px-7 sm:pt-7">
+        <CodeBlock label="Shared MCP endpoint" value={ORANGE_MCP_URL} />
+      </div>
 
-      {data ? (
-        <div className="mt-6 space-y-4">
-          <div className="rounded-lg border border-[#f97316]/25 bg-[#f97316]/10 p-4 text-sm leading-6 text-[#ffe3cf]">
-            Connected as{" "}
-            <span className="font-semibold text-white">{data.name ? `${data.name} (${data.email})` : data.email}</span>.
-            Add the config to <span className="font-mono text-white">{configPath}</span>, then launch Codex with the token exported.
+      <div
+        role="tablist"
+        aria-label="MCP client setup"
+        className="mx-5 mt-5 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/20 p-1.5 sm:mx-7 sm:grid-cols-4"
+      >
+        {TABS.map((item) => {
+          const selected = tab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              id={`mcp-tab-${item.id}`}
+              aria-controls={`mcp-panel-${item.id}`}
+              aria-selected={selected}
+              onClick={() => setTab(item.id)}
+              className={
+                selected
+                  ? "rounded-lg bg-[#f97316] px-3 py-2.5 text-xs font-semibold text-white shadow-[0_10px_28px_rgba(249,115,22,0.22)]"
+                  : "rounded-lg px-3 py-2.5 text-xs font-semibold text-[#9eaaa2] transition hover:bg-white/[0.05] hover:text-white"
+              }
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        role="tabpanel"
+        id={`mcp-panel-${tab}`}
+        aria-labelledby={`mcp-tab-${tab}`}
+        className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[0.9fr_1.1fr]"
+      >
+        <div>
+          <p className="text-base leading-7 text-[#d8e2da]">{setup.summary}</p>
+
+          <div className="mt-5 grid gap-3">
+          {setup.commands.map((command) => (
+            <CodeBlock key={command.label} label={command.label} value={command.value} />
+          ))}
           </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm leading-6 text-[#dbe7df]">
-            <p className="font-semibold text-white">How to use Orange</p>
-            <p className="mt-2">
-              Ask Codex to call <span className="font-mono text-[#f9a66b]">recall_memory</span> before useful work,{" "}
-              <span className="font-mono text-[#f9a66b]">checkpoint_context</span> when an important decision lands, and{" "}
-              <span className="font-mono text-[#f9a66b]">complete_conversation</span> once when the session is done.
-              The <span className="font-mono text-[#f9a66b]">orange_instructions</span> resource is also available for protocol guidance.
-            </p>
+
+          <div className="mt-4 rounded-xl border border-[#f97316]/20 bg-[#f97316]/[0.07] p-4 text-sm leading-6 text-[#dbe7df]">
+            <p className="font-semibold text-[#ffc28f]">Good to know</p>
+            <p className="mt-1 text-[#b8c3ba]">{setup.tip}</p>
           </div>
-          <CodeBlock label="1. Add to Codex config" value={data.codex_config} />
-          <CodeBlock label="2. Launch Codex" value={data.codex_command} />
-          <CodeBlock label="Claude Code alternative" value={data.claude_command} />
         </div>
-      ) : (
-        <ol className="mt-5 grid gap-3 text-sm leading-6 text-[#cbd8cf] md:grid-cols-3">
-          <li className="rounded-md bg-black/20 p-3">
-            <span className="font-mono text-[#f9a66b]">1</span> Continue with Google.
-          </li>
-          <li className="rounded-md bg-black/20 p-3">
-            <span className="font-mono text-[#f9a66b]">2</span> Copy the Codex config.
-          </li>
-          <li className="rounded-md bg-black/20 p-3">
-            <span className="font-mono text-[#f9a66b]">3</span> Ask Codex to remember work.
-          </li>
+
+        <ol className="grid gap-3">
+          {setup.steps.map((step, index) => (
+            <li key={step.title} className="grid grid-cols-[2.25rem_1fr] gap-3 rounded-xl border border-white/10 bg-white/[0.035] p-4">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full border border-[#f97316]/30 bg-[#f97316]/10 font-mono text-xs font-semibold text-[#f9a66b]">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-white">{step.title}</p>
+                <p className="mt-1 text-sm leading-6 text-[#aebbb2]">{step.body}</p>
+              </div>
+            </li>
+          ))}
         </ol>
-      )}
+      </div>
+
+      <div className="grid gap-px border-t border-white/10 bg-white/10 md:grid-cols-2">
+        <div className="bg-[#0d1210] p-5 text-sm leading-6 text-[#dbe7df] sm:p-6">
+          <p className="font-semibold text-white">How agents use Orange</p>
+          <p className="mt-2">
+            Recall before starting, checkpoint a critical finding, and complete the conversation once useful work is finished.
+          </p>
+        </div>
+        <div className="bg-[#0d1210] p-5 text-sm leading-6 text-[#dbe7df] sm:p-6">
+          <p className="font-semibold text-white">What stays consistent</p>
+          <p className="mt-2">
+            Every client writes to the same scoped Postgres graph. New nodes appear in the Orange UI without a manual refresh.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

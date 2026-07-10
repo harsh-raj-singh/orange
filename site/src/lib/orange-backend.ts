@@ -1,6 +1,7 @@
 type BackendFetchOptions = {
   method?: string;
   body?: unknown;
+  headers?: HeadersInit;
   signal?: AbortSignal;
   cache?: RequestCache;
   next?: {
@@ -30,11 +31,16 @@ export async function orangeBackendFetch<T>(path: string, options: BackendFetchO
     return null;
   }
 
+  const headers = new Headers(options.headers);
+  if (options.body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const requestInit: RequestInit & { next?: BackendFetchOptions["next"] } = {
     method: options.method ?? "GET",
     signal: options.signal,
-    headers: options.body ? { "Content-Type": "application/json" } : undefined,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   };
   if (options.cache) {
     requestInit.cache = options.cache;

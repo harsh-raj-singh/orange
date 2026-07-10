@@ -5,7 +5,7 @@ import re
 
 from core.agents.extraction_outputs import TriageDecision
 from core.agents.llm_caller import call_llm_json
-from core.agents.triage.prompts import GLOBAL_TRIAGE_AGENT_SYSTEM_PROMPT, USER_TRIAGE_AGENT_SYSTEM_PROMPT
+from core.agents.triage.prompts import TRIAGE_AGENT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,12 @@ _DURABLE_SIGNAL_PATTERNS = (
     r"\bmake (?:it|the site|the website)\b",
     r"\bsteering\b",
     r"\bfact\b",
+    r"\bdecision\b",
+    r"\boutcome\b",
+    r"\bconstraint\b",
+    r"\blesson\b",
+    r"\bremember\b",
+    r"\bstore\b",
 )
 
 
@@ -82,38 +88,50 @@ _ORG_FACT_PATTERNS = (
 )
 
 
-def _fallback_triage(transcript: str, *, scope: str = "user", company: str | None = None) -> TriageDecision:
+def _fallback_triage(transcript: str, *, company: str | None = None) -> TriageDecision:
     lowered = transcript.lower()
-    if scope == "global":
-        if not (company or "").strip():
-            return TriageDecision(worth_storing=False, reason="No company identity was supplied for shared memory.")
-        if any(re.search(pattern, lowered) for pattern in _ORG_FACT_PATTERNS):
-            return TriageDecision(worth_storing=True, reason="Conversation includes a durable company fact or decision.")
-        return TriageDecision(worth_storing=False, reason="No company-scoped shared fact or decision was evident.")
-
     if len(lowered.split()) < 32 and any(re.search(pattern, lowered) for pattern in _LOW_SIGNAL_PATTERNS):
-        return TriageDecision(worth_storing=False, reason="Conversation was a low-signal generic exchange.")
+        return TriageDecision(should_store=False, suggested_scope="user", confidence=0.85, reason="Conversation was a low-signal generic exchange.")
     if any(re.search(pattern, lowered) for pattern in _GENERIC_TASK_PATTERNS) and not any(
         re.search(pattern, lowered) for pattern in _STEERING_PATTERNS
     ):
-        return TriageDecision(worth_storing=False, reason="Generic execution request without durable steering.")
+        return TriageDecision(should_store=False, suggested_scope="user", confidence=0.78, reason="Generic execution request without durable steering.")
+
+    has_org_signal = any(re.search(pattern, lowered) for pattern in _ORG_FACT_PATTERNS)
+    has_user_signal = any(re.search(pattern, lowered) for pattern in _STEERING_PATTERNS)
+    suggested_scope = "both" if has_org_signal and has_user_signal else "global" if has_org_signal else "user"
     if any(re.search(pattern, lowered) for pattern in _DURABLE_SIGNAL_PATTERNS):
-        return TriageDecision(worth_storing=True, reason="Conversation contains durable memory signals.")
-    return TriageDecision(worth_storing=False, reason="No concrete technical learning was evident.")
+        confidence = 0.74 if suggested_scope == "user" or (company or "").strip() else 0.58
+        return TriageDecision(
+            should_store=True,
+            suggested_scope=suggested_scope,
+            confidence=confidence,
+            reason="Conversation contains durable memory signals.",
+        )
+    return TriageDecision(should_store=False, suggested_scope="user", confidence=0.72, reason="No durable decision, outcome, preference, constraint, or lesson was evident.")
 
 
-async def run_triage_agent(transcript: str, *, scope: str = "user", company: str | None = None) -> TriageDecision:
-    system_prompt = GLOBAL_TRIAGE_AGENT_SYSTEM_PROMPT if scope == "global" else USER_TRIAGE_AGENT_SYSTEM_PROMPT
-    user_content = f"Company/org: {company or 'unknown'}\n\nTranscript:\n{transcript}" if scope == "global" else transcript
+async def run_triage_agent(transcript: str, *, scope: str | None = None, company: str | None = None) -> TriageDecision:
+    user_content = f"Company/org: {company or 'unknown'}\nRequested scope override: {scope or 'none'}\n\nTranscript:\n{transcript}"
     try:
-        result = await call_llm_json(system_prompt, user_content)
+        result = await call_llm_json(TRIAGE_AGENT_SYSTEM_PROMPT, user_content)
         decision = TriageDecision.model_validate(result)
     except Exception as exc:  # noqa: BLE001
         logger.warning("triage_agent_fallback", extra={"error": str(exc)})
-        decision = _fallback_triage(transcript, scope=scope, company=company)
+        decision = _fallback_triage(transcript, company=company)
+
+    if scope in {"user", "global", "both"}:
+        decision.suggested_scope = scope
 
     logger.info(
         "triage_decision",
-        extra={"scope": scope, "company": company, "worth_storing": decision.worth_storing, "reason": decision.reason},
+        extra={
+            "suggested_scope": decision.suggested_scope,
+            "company": company,
+            "should_store": decision.should_store,
+            "confidence": decision.confidence,
+            "low_confidence": decision.low_confidence,
+            "reason": decision.reason,
+        },
     )
     return decision

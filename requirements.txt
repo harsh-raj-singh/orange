@@ -3,27 +3,13 @@ python-dotenv==1.0.1  # Environment variables
 psycopg[binary]==3.2.5  # Local Postgres client
 psycopg_pool==3.2.4  # Connection pooling
 
-# Mem0 runtime dependency
-mem0ai==1.0.3
-
-# Streamlit for debug UI
-streamlit==1.40.1
-
 # Viz API
-fastapi==0.110.1
+fastapi==0.128.0
 uvicorn[standard]==0.40.0
-fastmcp==2.14.3
+fastmcp==3.3.1
 
-# Explicit pins for local embeddings + vector + graph support
-sentence-transformers==5.0.0
-chromadb==0.4.24
-neo4j==5.25.0
-
-# NVIDIA/OpenAI client (mem0 already depends on OpenAI)
+# LLM + pgvector embedding client
 openai==2.15.0
-dspy-ai==3.2.1
-numpy==1.26.4
-google-auth==2.43.0
 
 # Development
 pytest==8.3.4  # Testing

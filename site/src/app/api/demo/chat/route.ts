@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { normalizeMemoryScope } from "@/lib/api";
 import { orangeBackendFetch } from "@/lib/orange-backend";
+import type { VerifiedSupabaseSession } from "@/lib/supabase-server";
+import { getVerifiedSupabaseSession } from "@/lib/supabase-server";
 
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
@@ -182,12 +184,19 @@ function buildMemoryContext(memory?: RecallMemoryResponse | null) {
   };
 }
 
-async function fetchMemoryContext(body: DemoChatRequest, latestUserMessage: string) {
+async function fetchMemoryContext(
+  body: DemoChatRequest,
+  latestUserMessage: string,
+  auth: VerifiedSupabaseSession,
+) {
   try {
     const memory = await orangeBackendFetch<RecallMemoryResponse>("/demo/recall_memory", {
       method: "POST",
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
       body: {
-        profile: body.profile,
+        profile: { ...body.profile, email: auth.email },
+        user_id: auth.userId,
+        user_email: auth.email,
         query: latestUserMessage,
         source: "cursor",
         min_score: 0.7,
@@ -209,6 +218,14 @@ function sse(event: string, data: unknown) {
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const auth = await getVerifiedSupabaseSession();
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Sign in to use Orange chat and memory recall." },
+      { status: 401 },
+    );
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -228,6 +245,14 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  body = {
+    ...body,
+    profile: {
+      ...body.profile,
+      email: auth.email,
+    },
+  };
 
   if (!Array.isArray(body.messages)) {
     return NextResponse.json(
@@ -250,7 +275,7 @@ export async function POST(request: Request) {
   }
 
   const latestUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
-  const memory = await fetchMemoryContext(body, latestUserMessage);
+  const memory = await fetchMemoryContext(body, latestUserMessage, auth);
 
   const timeoutMs = Number(process.env.OPENAI_CHAT_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
   const controller = new AbortController();

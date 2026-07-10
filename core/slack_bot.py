@@ -28,7 +28,7 @@ from slack_sdk import WebClient
 
 from core.mcp_server.handlers import handle_store_session
 from core.mcp_server.models import StoreSessionRequest
-from core.viz_api.dependencies import get_chroma, get_neo4j, get_postgres_store
+from core.viz_api.dependencies import get_memory_repository
 
 load_dotenv()
 
@@ -222,10 +222,12 @@ def _store_session(session: RecordingSession):
     return asyncio.run(
         handle_store_session(
             request,
-            neo4j=get_neo4j(),
-            chroma=get_chroma(),
+            repository=get_memory_repository(),
             llm=None,
-            postgres_store=get_postgres_store(),
+            enqueue_only=(
+                os.getenv("ORANGE_MEMORY_WRITE_MODE", "inline").strip().lower()
+                == "queued"
+            ),
         )
     )
 
@@ -306,6 +308,14 @@ def create_app() -> App:
         def _run_pipeline() -> None:
             try:
                 result = _store_session(session)
+                if result.job_id and result.job_status in {"queued", "retrying", "running"}:
+                    say(
+                        "Orange accepted the recording for durable extraction.\n\n"
+                        f"Job: `{result.job_id}` (`{result.job_status}`)\n"
+                        f"Session: `{result.session_id}`\n"
+                        "The live graph will refresh when extraction finishes."
+                    )
+                    return
                 created = result.insights_stored + result.problems_created + result.solutions_written
                 status_line = (
                     f"Created `{created}` graph items "

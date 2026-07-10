@@ -21,6 +21,7 @@ class FakeNeo4j:
         self.concepts: dict[tuple[str, str], dict[str, Any]] = {}
         self.problems: dict[tuple[str, str], dict[str, Any]] = {}
         self.solutions: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self.insights: dict[str, dict[str, Any]] = {}
         self.edges: set[tuple[str, str, str, str]] = set()
         self.query_log: list[tuple[str, dict[str, Any]]] = []
         self.problem_create_calls = 0
@@ -242,6 +243,29 @@ class FakeNeo4j:
                     }
                 )
             return FakeResult(None)
+
+        if "MATCH (i:Insight {node_id: $node_id})" in query:
+            payload = self.insights.get(str(params["node_id"]))
+            if payload is None:
+                return FakeResult(None)
+            return FakeResult(
+                {
+                    "display_label": payload.get("display_label"),
+                    "display_summary": payload.get("display_summary"),
+                    "memory_kind": payload.get("memory_kind"),
+                    "org_id": payload.get("org_id"),
+                    "company": payload.get("company"),
+                    "what": payload.get("what"),
+                    "why": payload.get("why"),
+                    "how": payload.get("how"),
+                    "outcome": payload.get("outcome"),
+                    "tags": payload.get("tags", []),
+                    "raw_session_id": payload.get("raw_session_id"),
+                    "session_title": payload.get("session_title"),
+                    "session_summary": payload.get("session_summary"),
+                    "similar_insights": payload.get("similar_insights", []),
+                }
+            )
 
         if "H6:GET_NODE_WITH_NEIGHBORS" in query:
             node_id = str(params["node_id"])

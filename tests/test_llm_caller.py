@@ -41,7 +41,10 @@ def test_resolve_llm_config_is_cached_after_first_success(monkeypatch: pytest.Mo
     assert llm_caller._resolve_llm_config() == first
 
 
-def test_call_llm_json_backs_off_between_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_call_llm_json_backs_off_without_writing_to_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     class FakeCompletions:
         def __init__(self) -> None:
             self.calls = 0
@@ -68,3 +71,4 @@ def test_call_llm_json_backs_off_between_retries(monkeypatch: pytest.MonkeyPatch
 
     assert result == {"ok": True}
     assert sleep_attempts == [1, 2]
+    assert capsys.readouterr().out == ""

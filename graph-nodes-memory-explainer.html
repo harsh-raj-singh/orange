@@ -1,0 +1,1668 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orange Graph Nodes: Storage and Retrieval Explainer</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #18231f;
+        --muted: #5e6a64;
+        --soft: #f7f2e8;
+        --paper: #fffdf7;
+        --panel: #ffffff;
+        --line: #d8dfd8;
+        --orange: #c5561d;
+        --orange-2: #ef8d45;
+        --green: #2e7250;
+        --green-soft: #e9f4ee;
+        --blue: #315f85;
+        --blue-soft: #e8f1f7;
+        --amber: #966b18;
+        --amber-soft: #fff2ce;
+        --red: #9b3b30;
+        --red-soft: #fae8e5;
+        --charcoal: #22312b;
+        --shadow: 0 18px 45px rgba(39, 47, 43, 0.1);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(247, 242, 232, 0.94), rgba(238, 244, 240, 0.88)),
+          repeating-linear-gradient(90deg, rgba(24, 35, 31, 0.03) 0 1px, transparent 1px 72px);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        line-height: 1.55;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 24px 18px 72px;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin: -24px -18px 0;
+        padding: 12px 18px;
+        border-bottom: 1px solid rgba(34, 49, 43, 0.12);
+        background: rgba(255, 253, 247, 0.88);
+        backdrop-filter: blur(18px);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .mark {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border-radius: var(--radius);
+        background: var(--orange);
+        color: white;
+        box-shadow: 0 8px 22px rgba(197, 86, 29, 0.28);
+      }
+
+      .topnav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .topnav a,
+      .ghost-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 34px;
+        padding: 7px 10px;
+        border: 1px solid rgba(34, 49, 43, 0.14);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--charcoal);
+        font-size: 0.82rem;
+        font-weight: 750;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr);
+        gap: 28px;
+        align-items: stretch;
+        padding: 50px 0 22px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 14px;
+        color: var(--orange);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        max-width: 860px;
+        font-size: clamp(2.45rem, 6vw, 5.6rem);
+      }
+
+      h2 {
+        font-size: clamp(1.7rem, 3vw, 2.8rem);
+      }
+
+      h3 {
+        font-size: 1rem;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .lead {
+        max-width: 780px;
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: clamp(1rem, 1.4vw, 1.18rem);
+      }
+
+      .answer-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 26px;
+      }
+
+      .answer {
+        min-height: 128px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.8);
+      }
+
+      .answer b {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--charcoal);
+      }
+
+      .answer span {
+        color: var(--muted);
+        font-size: 0.93rem;
+      }
+
+      .stage {
+        position: relative;
+        min-height: 530px;
+        overflow: hidden;
+        border: 1px solid rgba(34, 49, 43, 0.16);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(135deg, rgba(34, 49, 43, 0.95), rgba(22, 36, 44, 0.94)),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 48px);
+        box-shadow: var(--shadow);
+      }
+
+      .stage-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px;
+        color: #eef7f0;
+      }
+
+      .stage-header strong {
+        display: block;
+        font-size: 1.05rem;
+      }
+
+      .stage-header span {
+        color: #b8c9c1;
+        font-size: 0.86rem;
+      }
+
+      .graph-art {
+        position: absolute;
+        inset: 78px 10px 16px;
+      }
+
+      .graph-art svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .edge {
+        stroke: rgba(221, 231, 226, 0.45);
+        stroke-width: 2;
+      }
+
+      .edge-hot {
+        stroke: rgba(239, 141, 69, 0.85);
+        stroke-width: 3;
+      }
+
+      .node-dot {
+        position: absolute;
+        display: grid;
+        place-items: center;
+        width: 114px;
+        min-height: 78px;
+        padding: 10px;
+        transform: translate(-50%, -50%);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: var(--radius);
+        background: rgba(255, 253, 247, 0.92);
+        color: var(--charcoal);
+        box-shadow: 0 16px 30px rgba(0, 0, 0, 0.24);
+        text-align: center;
+        cursor: pointer;
+      }
+
+      .node-dot[data-tone="orange"] {
+        border-color: rgba(239, 141, 69, 0.8);
+      }
+
+      .node-dot[data-tone="green"] {
+        border-color: rgba(85, 178, 125, 0.8);
+      }
+
+      .node-dot[data-tone="blue"] {
+        border-color: rgba(107, 164, 206, 0.8);
+      }
+
+      .node-dot b {
+        display: block;
+        font-size: 0.83rem;
+        line-height: 1.1;
+      }
+
+      .node-dot small {
+        display: block;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 0.7rem;
+      }
+
+      .section {
+        margin-top: 38px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 16px;
+      }
+
+      .section-head p {
+        max-width: 620px;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 10px 26px rgba(39, 47, 43, 0.06);
+      }
+
+      .panel-pad {
+        padding: 16px;
+      }
+
+      .span-3 {
+        grid-column: span 3;
+      }
+
+      .span-4 {
+        grid-column: span 4;
+      }
+
+      .span-5 {
+        grid-column: span 5;
+      }
+
+      .span-6 {
+        grid-column: span 6;
+      }
+
+      .span-7 {
+        grid-column: span 7;
+      }
+
+      .span-8 {
+        grid-column: span 8;
+      }
+
+      .span-12 {
+        grid-column: span 12;
+      }
+
+      .metric {
+        display: flex;
+        flex-direction: column;
+        min-height: 150px;
+      }
+
+      .metric .num {
+        margin-top: auto;
+        color: var(--orange);
+        font-size: clamp(2rem, 4vw, 3.1rem);
+        font-weight: 850;
+      }
+
+      .metric p {
+        color: var(--muted);
+        font-size: 0.94rem;
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 12px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 5px 9px;
+        border: 1px solid rgba(34, 49, 43, 0.14);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--charcoal);
+        font-size: 0.78rem;
+        font-weight: 750;
+      }
+
+      .pill.green {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .pill.blue {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .pill.amber {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .pill.red {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .tab-button,
+      .option-button {
+        min-height: 38px;
+        padding: 8px 12px;
+        border: 1px solid rgba(34, 49, 43, 0.16);
+        border-radius: var(--radius);
+        background: #fff;
+        color: var(--charcoal);
+        font-weight: 780;
+        cursor: pointer;
+      }
+
+      .tab-button[aria-selected="true"],
+      .option-button.is-active {
+        border-color: rgba(197, 86, 29, 0.45);
+        background: #fff1e6;
+        color: #8f3b14;
+      }
+
+      .tab-panel {
+        display: none;
+      }
+
+      .tab-panel.is-active {
+        display: block;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(130px, 1fr));
+        gap: 10px;
+      }
+
+      .step {
+        position: relative;
+        min-height: 170px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+      }
+
+      .step:after {
+        content: "";
+        position: absolute;
+        top: 42px;
+        right: -10px;
+        width: 10px;
+        height: 2px;
+        background: var(--orange);
+      }
+
+      .step:last-child:after {
+        display: none;
+      }
+
+      .step .kicker {
+        color: var(--orange);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.72rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .step p {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .simulator {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.84fr) minmax(0, 1.16fr);
+        gap: 14px;
+      }
+
+      .control-list {
+        display: grid;
+        gap: 9px;
+      }
+
+      .check-row {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        padding: 11px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+      }
+
+      .check-row input {
+        width: 18px;
+        height: 18px;
+        margin-top: 2px;
+        accent-color: var(--orange);
+      }
+
+      .check-row strong {
+        display: block;
+        line-height: 1.25;
+      }
+
+      .check-row span {
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+
+      .select-row,
+      .slider-row {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      label {
+        color: var(--charcoal);
+        font-weight: 800;
+      }
+
+      select,
+      input[type="range"] {
+        width: 100%;
+      }
+
+      select {
+        min-height: 42px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        color: var(--charcoal);
+      }
+
+      .decision-card {
+        min-height: 100%;
+        padding: 18px;
+        border-radius: var(--radius);
+        background: linear-gradient(135deg, #22312b, #1c2b33);
+        color: #eff8f2;
+      }
+
+      .decision-card .verdict {
+        display: inline-flex;
+        align-items: center;
+        margin-bottom: 18px;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.11);
+        color: #fff;
+        font-weight: 850;
+      }
+
+      .scorebar {
+        height: 12px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+      }
+
+      .scorebar span {
+        display: block;
+        width: 0%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #ef8d45, #62bd89);
+        transition: width 180ms ease;
+      }
+
+      .decision-card dl {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin: 18px 0 0;
+      }
+
+      .decision-card dt {
+        color: #aac0b7;
+        font-size: 0.74rem;
+        font-weight: 850;
+        text-transform: uppercase;
+      }
+
+      .decision-card dd {
+        margin: 2px 0 0;
+        font-weight: 760;
+      }
+
+      .reason-box {
+        margin-top: 16px;
+        padding: 13px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.08);
+        color: #dce9e2;
+      }
+
+      .code {
+        overflow: auto;
+        margin: 0;
+        padding: 14px;
+        border-radius: var(--radius);
+        background: #18231f;
+        color: #e7f0e8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+        line-height: 1.6;
+        white-space: pre;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 780px;
+      }
+
+      th,
+      td {
+        padding: 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: #f3f7f3;
+        color: var(--charcoal);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+      }
+
+      td {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .accordion {
+        display: grid;
+        gap: 9px;
+      }
+
+      details {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+      }
+
+      summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 52px;
+        padding: 12px 14px;
+        cursor: pointer;
+        font-weight: 850;
+      }
+
+      summary::marker {
+        content: "";
+      }
+
+      details summary:after {
+        content: "+";
+        color: var(--orange);
+        font-size: 1.2rem;
+      }
+
+      details[open] summary:after {
+        content: "-";
+      }
+
+      details p,
+      details ul {
+        margin: 0;
+        padding: 0 14px 14px;
+        color: var(--muted);
+      }
+
+      details ul {
+        padding-left: 32px;
+      }
+
+      li + li {
+        margin-top: 7px;
+      }
+
+      .retrieval-stage {
+        display: grid;
+        grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+        gap: 14px;
+      }
+
+      .query-list {
+        display: grid;
+        gap: 9px;
+      }
+
+      .query-card {
+        width: 100%;
+        min-height: 70px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        color: var(--charcoal);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .query-card.is-active {
+        border-color: rgba(197, 86, 29, 0.5);
+        background: #fff4eb;
+      }
+
+      .query-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .match-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .match {
+        display: grid;
+        grid-template-columns: 84px minmax(0, 1fr);
+        gap: 12px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+      }
+
+      .match .score {
+        display: grid;
+        place-items: center;
+        min-height: 72px;
+        border-radius: var(--radius);
+        background: var(--blue-soft);
+        color: var(--blue);
+        font-weight: 900;
+      }
+
+      .match[data-source="user"] .score {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .match[data-source="global"] .score {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .match small {
+        color: var(--muted);
+        font-weight: 760;
+        text-transform: uppercase;
+      }
+
+      .match p {
+        margin-top: 4px;
+        color: var(--muted);
+      }
+
+      .timeline {
+        position: relative;
+        display: grid;
+        gap: 12px;
+      }
+
+      .timeline:before {
+        content: "";
+        position: absolute;
+        top: 10px;
+        bottom: 10px;
+        left: 16px;
+        width: 2px;
+        background: rgba(197, 86, 29, 0.28);
+      }
+
+      .event {
+        position: relative;
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 12px;
+      }
+
+      .event-dot {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 999px;
+        background: var(--orange);
+        color: #fff;
+        font-weight: 900;
+      }
+
+      .event-box {
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+      }
+
+      .event-box p {
+        margin-top: 4px;
+        color: var(--muted);
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .status {
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+      }
+
+      .status strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .status p {
+        color: var(--muted);
+      }
+
+      .callout {
+        border: 1px solid rgba(197, 86, 29, 0.22);
+        border-radius: var(--radius);
+        background: #fff5ec;
+        padding: 16px;
+      }
+
+      .callout p {
+        color: #673015;
+      }
+
+      .foot {
+        margin-top: 34px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      @media (max-width: 960px) {
+        .hero,
+        .simulator,
+        .retrieval-stage {
+          grid-template-columns: 1fr;
+        }
+
+        .answer-strip,
+        .status-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .flow {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .step:after {
+          display: none;
+        }
+
+        .span-3,
+        .span-4,
+        .span-5,
+        .span-6,
+        .span-7,
+        .span-8,
+        .span-12 {
+          grid-column: span 12;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .topnav {
+          justify-content: flex-start;
+        }
+
+        .stage {
+          min-height: 600px;
+        }
+
+        .graph-art {
+          top: 92px;
+        }
+
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        .decision-card dl {
+          grid-template-columns: 1fr;
+        }
+
+        .match {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="mark" aria-hidden="true">O</span>
+          <span>Orange graph nodes</span>
+        </div>
+        <nav class="topnav" aria-label="Page sections">
+          <a href="#pipeline">Pipeline</a>
+          <a href="#storage">Storage decision</a>
+          <a href="#retrieval">Retrieval</a>
+          <a href="#status">Status</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" id="overview">
+          <div>
+            <p class="eyebrow">Selling point: durable agent memory</p>
+            <h1>Graph nodes decide what matters, then retrieve it when the work rhymes.</h1>
+            <p class="lead">
+              Orange is already built around a completed-session memory loop: capture the session, triage
+              whether it is durable, extract compact Insight nodes, write Neo4j plus Chroma, then recall
+              similar memories before the next agent answers.
+            </p>
+            <div class="answer-strip" aria-label="Short answers">
+              <div class="answer">
+                <b>Where are we?</b>
+                <span>Implemented for completed sessions, demo chat, MCP handlers, Neo4j graph writes, Chroma vector writes, user/global scoping, and recall.</span>
+              </div>
+              <div class="answer">
+                <b>What gets stored?</b>
+                <span>Technical learning, root causes, tried approaches, durable user/company facts, preferences, and product steering. Generic chats are skipped.</span>
+              </div>
+              <div class="answer">
+                <b>How retrieval works?</b>
+                <span>Query text is embedded through Chroma, filtered by user email and/or company org, score-gated, then hydrated from Neo4j with neighborhood context.</span>
+              </div>
+            </div>
+          </div>
+
+          <aside class="stage" aria-label="Graph memory visual">
+            <div class="stage-header">
+              <div>
+                <strong>Session -> Insight -> Recall</strong>
+                <span>Click nodes below to inspect their role.</span>
+              </div>
+              <span class="pill green">v2 Insight graph</span>
+            </div>
+            <div class="graph-art">
+              <svg viewBox="0 0 420 410" aria-hidden="true">
+                <line class="edge-hot" x1="78" y1="70" x2="210" y2="162"></line>
+                <line class="edge-hot" x1="210" y1="162" x2="344" y2="72"></line>
+                <line class="edge" x1="210" y1="162" x2="103" y2="326"></line>
+                <line class="edge" x1="210" y1="162" x2="316" y2="322"></line>
+                <line class="edge" x1="103" y1="326" x2="316" y2="322"></line>
+              </svg>
+              <button class="node-dot" data-node-key="session" data-tone="orange" style="left: 18%; top: 18%">
+                <b>Session</b><small>completed transcript</small>
+              </button>
+              <button class="node-dot" data-node-key="triage" data-tone="blue" style="left: 50%; top: 40%">
+                <b>Triage</b><small>store or skip</small>
+              </button>
+              <button class="node-dot" data-node-key="insight" data-tone="green" style="left: 82%; top: 18%">
+                <b>Insight</b><small>what / why / how</small>
+              </button>
+              <button class="node-dot" data-node-key="chroma" data-tone="blue" style="left: 25%; top: 80%">
+                <b>Chroma</b><small>semantic match</small>
+              </button>
+              <button class="node-dot" data-node-key="neo4j" data-tone="green" style="left: 75%; top: 79%">
+                <b>Neo4j</b><small>graph hydrate</small>
+              </button>
+            </div>
+          </aside>
+        </section>
+
+        <section class="section" id="pipeline">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">End-to-end loop</p>
+              <h2>What happens when a conversation is marked done</h2>
+            </div>
+            <p>The current code path is centered in <b>core/agents/orchestrator.py</b>, with writes in <b>core/graph_upsert/writer.py</b> and recall in <b>core/mcp_server/handlers.py</b>.</p>
+          </div>
+
+          <div class="flow">
+            <article class="step">
+              <span class="kicker">01 ingest</span>
+              <h3>Normalize session</h3>
+              <p>Source, messages, timestamps, profile metadata, user email, company, org id, and source URL become a NormalizedSession.</p>
+            </article>
+            <article class="step">
+              <span class="kicker">02 trigger</span>
+              <h3>Only after done</h3>
+              <p>The demo and MCP path call store_session after completion, so Orange stores outcomes, not every half-formed exchange.</p>
+            </article>
+            <article class="step">
+              <span class="kicker">03 triage</span>
+              <h3>Worth storing?</h3>
+              <p>User and global triage agents decide if there is reusable memory. Fallback regex rules keep the system working if LLM triage fails.</p>
+            </article>
+            <article class="step">
+              <span class="kicker">04 extract</span>
+              <h3>Insight drafts</h3>
+              <p>The extractor returns a minimal list of InsightDraft objects: what, why, how, outcome, memory_kind, tags, label, summary.</p>
+            </article>
+            <article class="step">
+              <span class="kicker">05 write</span>
+              <h3>Neo4j + Chroma</h3>
+              <p>Neo4j gets Session and Insight nodes plus PRODUCED and SIMILAR_TO edges. Chroma gets searchable vector documents.</p>
+            </article>
+            <article class="step">
+              <span class="kicker">06 recall</span>
+              <h3>Use next time</h3>
+              <p>recall_memory searches vectors, filters by scope, then hydrates matching graph nodes and neighborhoods for the agent.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="nodes">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Node model</p>
+              <h2>What the graph is storing</h2>
+            </div>
+            <p>New completed-session writes use unified Insight nodes. Legacy Problem and Solution nodes still exist for compatibility and older flows.</p>
+          </div>
+
+          <div class="grid">
+            <article class="panel panel-pad span-4 metric">
+              <h3>Session</h3>
+              <p>The source conversation envelope: source, title, summary, participants, org id, started and ended time, source URL, message count.</p>
+              <div class="num">1</div>
+            </article>
+            <article class="panel panel-pad span-4 metric">
+              <h3>Insight</h3>
+              <p>The current durable memory node. It stores the compact reusable lesson and the scoping metadata needed for safe recall.</p>
+              <div class="num">v2</div>
+            </article>
+            <article class="panel panel-pad span-4 metric">
+              <h3>Edges</h3>
+              <p>Session PRODUCED Insight. Similar memories link with SIMILAR_TO when the Chroma match is high enough.</p>
+              <div class="num">2+</div>
+            </article>
+
+            <div class="panel panel-pad span-7">
+              <div class="tabs" role="tablist" aria-label="Node schema tabs">
+                <button class="tab-button" id="tab-insight" role="tab" aria-selected="true" aria-controls="panel-insight" data-tab="insight">Insight</button>
+                <button class="tab-button" id="tab-session" role="tab" aria-selected="false" aria-controls="panel-session" data-tab="session">Session</button>
+                <button class="tab-button" id="tab-legacy" role="tab" aria-selected="false" aria-controls="panel-legacy" data-tab="legacy">Legacy nodes</button>
+              </div>
+              <div class="tab-panel is-active" id="panel-insight" role="tabpanel" aria-labelledby="tab-insight" data-panel="insight">
+                <pre class="code">Insight {
+  scope: "user" | "global"
+  user_id, user_email       // user memory
+  org_id, company           // shared company memory
+  contributed_by            // audit only for global
+  memory_kind: technical_insight | user_fact | company_fact | preference | steering
+  what, why, how
+  outcome: resolved | exploratory | partial | abandoned
+  tags[]
+  display_label, display_summary
+  raw_session_id
+}</pre>
+              </div>
+              <div class="tab-panel" id="panel-session" role="tabpanel" aria-labelledby="tab-session" data-panel="session">
+                <pre class="code">Session {
+  node_id, scope
+  source: mcp | codex | cursor | claude | slack | gmail | streamlit
+  user_id, user_email, org_id
+  title, summary, message_count
+  external_session_id, source_url
+  participants[], client_name, client_version
+  started_at, ended_at, ingested_at
+}</pre>
+              </div>
+              <div class="tab-panel" id="panel-legacy" role="tabpanel" aria-labelledby="tab-legacy" data-panel="legacy">
+                <pre class="code">Problem / Solution / Concept still exist:
+  Problem captures concrete bugs, root causes, files, stack traces.
+  Solution captures attempts, steps, outcome, snippets.
+  Concept captures taxonomy.
+
+Current completed-session pipeline writes Insight nodes first.
+Legacy upsert_v2 remains for tests and migration compatibility.</pre>
+              </div>
+            </div>
+
+            <aside class="panel panel-pad span-5" id="nodeDetail">
+              <h3>Click a visual node</h3>
+              <p style="margin-top: 8px; color: var(--muted)">The graph at the top doubles as a compact explainer. Pick any node to see exactly what it contributes to the product story.</p>
+              <div class="pill-row">
+                <span class="pill amber">private memory</span>
+                <span class="pill blue">company memory</span>
+                <span class="pill green">retrieval context</span>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="section" id="storage">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Storage decision</p>
+              <h2>What makes the agent store or skip a conversation</h2>
+            </div>
+            <p>The rule is intentionally strict: store only memory future agents cannot reliably infer from general knowledge.</p>
+          </div>
+
+          <div class="simulator">
+            <div class="panel panel-pad">
+              <div class="select-row">
+                <label for="scopeSelect">Memory scope</label>
+                <select id="scopeSelect">
+                  <option value="user">User memory</option>
+                  <option value="global">Company/global memory</option>
+                </select>
+              </div>
+              <div class="control-list" aria-label="Conversation signal controls">
+                <label class="check-row">
+                  <input type="checkbox" data-signal="technical" checked />
+                  <span><strong>Concrete technical problem</strong><span>Error, failed attempt, root cause, fix, or useful debug trail.</span></span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" data-signal="decision" checked />
+                  <span><strong>Non-obvious decision</strong><span>A tradeoff or conclusion that matters later.</span></span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" data-signal="fact" />
+                  <span><strong>Durable fact</strong><span>User/company/workflow/tool/product fact not known by a normal model.</span></span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" data-signal="steering" />
+                  <span><strong>Preference or steering</strong><span>Design direction, product taste, copy tone, required fields, or future behavior.</span></span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" data-signal="generic" />
+                  <span><strong>Generic or low-signal request</strong><span>Greeting, docs restatement, "create a website", or generic answer with no reusable learning.</span></span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" data-signal="org" />
+                  <span><strong>Company/org identity present</strong><span>Required before anything can enter shared company memory.</span></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="decision-card" aria-live="polite">
+              <span class="verdict" id="storageVerdict">Store in user memory</span>
+              <h3 id="storageTitle">This conversation has durable memory signals.</h3>
+              <p id="storageBody" style="margin-top: 10px; color: #cfe0d8"></p>
+              <div style="margin-top: 18px">
+                <div class="scorebar" aria-label="Storage confidence score"><span id="storageBar"></span></div>
+              </div>
+              <dl>
+                <div>
+                  <dt>Signal score</dt>
+                  <dd id="storageScore">0.80</dd>
+                </div>
+                <div>
+                  <dt>Memory kind</dt>
+                  <dd id="memoryKind">technical_insight</dd>
+                </div>
+                <div>
+                  <dt>Write target</dt>
+                  <dd id="writeTarget">Neo4j + Chroma</dd>
+                </div>
+                <div>
+                  <dt>Fallback behavior</dt>
+                  <dd id="fallbackText">Regex heuristic if LLM triage fails</dd>
+                </div>
+              </dl>
+              <div class="reason-box" id="storageReason"></div>
+            </div>
+          </div>
+
+          <div class="grid" style="margin-top: 14px">
+            <div class="panel panel-pad span-6">
+              <h3>Store examples</h3>
+              <div class="pill-row">
+                <span class="pill green">root cause discovered</span>
+                <span class="pill green">fix worked</span>
+                <span class="pill green">failed path worth avoiding</span>
+                <span class="pill green">company uses .md files</span>
+                <span class="pill green">make Orange feel Linear-like</span>
+                <span class="pill green">Q3 soft launch decision</span>
+              </div>
+            </div>
+            <div class="panel panel-pad span-6">
+              <h3>Skip examples</h3>
+              <div class="pill-row">
+                <span class="pill red">hello / thanks</span>
+                <span class="pill red">reverse a string</span>
+                <span class="pill red">generic website request</span>
+                <span class="pill red">documentation restatement</span>
+                <span class="pill red">no conclusion</span>
+                <span class="pill red">global memory with no company</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="retrieval">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Retrieval</p>
+              <h2>What happens when a similar question appears later</h2>
+            </div>
+            <p>Chroma finds semantic candidates. Neo4j turns them into useful context by fetching node details and nearby graph relationships.</p>
+          </div>
+
+          <div class="retrieval-stage">
+            <aside class="panel panel-pad">
+              <div class="slider-row">
+                <label for="scoreSlider">Minimum user score: <span id="scoreReadout">0.70</span></label>
+                <input id="scoreSlider" type="range" min="0.55" max="0.95" step="0.01" value="0.70" />
+              </div>
+              <div class="query-list">
+                <button class="query-card is-active" data-query="cors">
+                  CORS preflight returns 405 again
+                  <span>Should recall prior middleware ordering fix.</span>
+                </button>
+                <button class="query-card" data-query="design">
+                  How should the Orange graph page feel?
+                  <span>Should recall private product steering.</span>
+                </button>
+                <button class="query-card" data-query="company">
+                  What format does our company use for memory sources?
+                  <span>Should recall org-scoped shared memory.</span>
+                </button>
+                <button class="query-card" data-query="generic">
+                  How do I reverse a string?
+                  <span>Should not retrieve anything useful.</span>
+                </button>
+              </div>
+            </aside>
+
+            <div class="panel panel-pad">
+              <div class="timeline" style="margin-bottom: 14px">
+                <div class="event">
+                  <span class="event-dot">1</span>
+                  <div class="event-box">
+                    <strong>Agent calls recall_memory(query, user_id, source, email, company, scope)</strong>
+                    <p>Demo chat does this before answering. MCP exposes the same tool to connected agent clients.</p>
+                  </div>
+                </div>
+                <div class="event">
+                  <span class="event-dot">2</span>
+                  <div class="event-box">
+                    <strong>Chroma searches scoped vector collections</strong>
+                    <p>User memory uses orange_user_vectors filtered by user_email or user_id. Shared memory uses orange_global_vectors filtered by org_id.</p>
+                  </div>
+                </div>
+                <div class="event">
+                  <span class="event-dot">3</span>
+                  <div class="event-box">
+                    <strong>Neo4j hydrates the winning nodes</strong>
+                    <p>For Insight nodes, recall returns display fields, what/why/how, tags, session summary, raw session id, and similar insight labels.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="match-list" id="matches"></div>
+            </div>
+          </div>
+
+          <div class="grid" style="margin-top: 14px">
+            <div class="panel panel-pad span-6">
+              <h3>Dedup and similar-node behavior</h3>
+              <p style="margin-top: 8px; color: var(--muted)">
+                On write, new Insight documents are compared against existing scoped vectors. If the same generated node id appears, the duplicate is skipped. If another node scores at least 0.88, Orange writes SIMILAR_TO instead of pretending it is unrelated.
+              </p>
+            </div>
+            <div class="panel panel-pad span-6">
+              <h3>Why graph plus vector is the selling point</h3>
+              <p style="margin-top: 8px; color: var(--muted)">
+                Vector search answers "does this sound similar?" The graph answers "what exactly did we learn, who can see it, which session produced it, and what other nodes are adjacent?"
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="status">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Current implementation status</p>
+              <h2>Where we are right now</h2>
+            </div>
+            <p>This is the product-state view based on the repo as of 2026-05-24.</p>
+          </div>
+
+          <div class="status-grid">
+            <div class="status">
+              <strong>Implemented: completed-session memory loop</strong>
+              <p>README, demo route, MCP store_session, orchestrator, triage, extractor, writer, Neo4j, and Chroma are wired around completed sessions.</p>
+            </div>
+            <div class="status">
+              <strong>Implemented: private and shared scopes</strong>
+              <p>User memory is keyed by email/user id. Shared memory is keyed by cleaned org_id/company and gets PII scrubbed before extraction.</p>
+            </div>
+            <div class="status">
+              <strong>Implemented: retrieval before demo answers</strong>
+              <p>The demo chat calls /demo/recall_memory with scope "both", formats matches as context, and displays retrieval chips in the chat UI.</p>
+            </div>
+            <div class="status">
+              <strong>Implemented: graph inspection endpoints</strong>
+              <p>The backend exposes graph, Chroma, health, and MCP routes for checking nodes and vector collection state.</p>
+            </div>
+            <div class="status">
+              <strong>Partial: full dedup semantics</strong>
+              <p>Insight similarity is present with a 0.88 threshold and SIMILAR_TO edges. True semantic merging is conservative and still more mature in legacy Problem dedup.</p>
+            </div>
+            <div class="status">
+              <strong>Partial: retrieval quality ranking</strong>
+              <p>Recall score-gates results and dedupes by label, preferring user memory over global duplicates. It does not yet do LLM reranking or multi-hop graph expansion beyond the fetched neighborhood.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="details">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Deep details</p>
+              <h2>Exact answers you can use in a pitch</h2>
+            </div>
+          </div>
+
+          <div class="accordion">
+            <details open>
+              <summary>What makes the agent say "this is worth storing"?</summary>
+              <ul>
+                <li>The user triage prompt says to store concrete technical problems, evaluated approaches, discovered root causes, non-obvious decisions, interesting failures, durable facts, and steering feedback.</li>
+                <li>The global triage prompt is stricter: store only company/org facts, internal workflow constraints, durable company decisions, incidents, or technical causes useful to coworkers in the same company.</li>
+                <li>Fallback triage looks for durable signals such as error, failed, fixed, resolved, root cause, tried, prefer, should, steering, company uses, markdown, AWS Glue, GTM, pricing, investors, and launch strategy.</li>
+                <li>Low-signal patterns like hello, thanks, reverse a string, "what is Orange", or a generic create-a-website request without reusable steering are skipped.</li>
+              </ul>
+            </details>
+            <details>
+              <summary>What fields are embedded for retrieval?</summary>
+              <p>The Insight embedding string is built from what, why, how, memory_kind, and tags. The display label alone is not enough, because short labels collide. This is why a later query can match the underlying situation even when it uses different wording.</p>
+            </details>
+            <details>
+              <summary>What happens if someone asks a similar question already present in nodes?</summary>
+              <p>recall_memory queries Chroma with the new question, filters candidates by identity and scope, converts distance to similarity, drops low scores, fetches matching nodes from Neo4j, and returns node_data plus neighborhood. The agent receives that compact memory context before producing its answer.</p>
+            </details>
+            <details>
+              <summary>How are private and company memories kept apart?</summary>
+              <p>User vectors require scope=user plus user_email or user_id. Global vectors require scope=global plus org_id. The global pipeline uses a user-message transcript and PII scrubber, and it refuses shared memory when no company/org context exists.</p>
+            </details>
+            <details>
+              <summary>What should be improved next?</summary>
+              <ul>
+                <li>Add a retrieval evaluation set with known queries, expected node ids, and score thresholds.</li>
+                <li>Add LLM reranking after Chroma for close candidates and ambiguous queries.</li>
+                <li>Expose "why this was stored" and "why this was retrieved" in the UI for sales demos.</li>
+                <li>Make duplicate Insight handling richer: merge recurrence counts or update summaries instead of only skipping exact generated ids and linking similar nodes.</li>
+                <li>Add multi-hop expansion controls for related sessions, similar insights, and old Problem/Solution neighborhoods.</li>
+              </ul>
+            </details>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="callout">
+            <h3>One-line product framing</h3>
+            <p style="margin-top: 8px">
+              Orange does not store chat logs. It converts completed work into scoped graph memory, then lets future agents retrieve the exact prior learning when a semantically similar situation appears.
+            </p>
+          </div>
+          <p class="foot">
+            Source files referenced: README.md, core/agents/orchestrator.py, core/agents/triage/prompts.py,
+            core/agents/insight_extractor/extractor.py, core/graph_upsert/writer.py,
+            core/graph_upsert/embeddings.py, core/mcp_server/handlers.py, site/src/app/api/demo/chat/route.ts.
+          </p>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const nodeInfo = {
+        session: {
+          title: "Session node",
+          body:
+            "A completed conversation envelope. It preserves source, title, summary, participants, org id, source URL, message count, and timing. It is the provenance anchor for every memory.",
+          pills: ["MERGE Session", "raw_session_id", "PRODUCED edge"],
+        },
+        triage: {
+          title: "Triage decision",
+          body:
+            "The gatekeeper. User triage stores durable technical learning, facts, preferences, and steering. Global triage stores only company-scoped facts or decisions and requires org identity.",
+          pills: ["worth_storing", "reason", "strict by default"],
+        },
+        insight: {
+          title: "Insight node",
+          body:
+            "The current selling-point node. It stores what happened, why it mattered, how it was handled, the outcome, memory kind, tags, display label, summary, and access scope.",
+          pills: ["what / why / how", "memory_kind", "tags"],
+        },
+        chroma: {
+          title: "Chroma vector document",
+          body:
+            "The semantic lookup layer. It embeds what, why, how, memory kind, and tags, then filters by user_email/user_id or org_id before returning candidate matches.",
+          pills: ["orange_user_vectors", "orange_global_vectors", "cosine distance"],
+        },
+        neo4j: {
+          title: "Neo4j graph hydrate",
+          body:
+            "The context layer. After Chroma finds candidates, Neo4j returns node detail and neighborhood fields such as session summary, raw session id, and similar insight labels.",
+          pills: ["node_data", "neighborhood", "SIMILAR_TO"],
+        },
+      };
+
+      const detail = document.querySelector("#nodeDetail");
+      document.querySelectorAll("[data-node-key]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = nodeInfo[button.dataset.nodeKey];
+          detail.innerHTML = `
+            <h3>${item.title}</h3>
+            <p style="margin-top: 8px; color: var(--muted)">${item.body}</p>
+            <div class="pill-row">${item.pills.map((pill) => `<span class="pill blue">${pill}</span>`).join("")}</div>
+          `;
+        });
+      });
+
+      document.querySelectorAll(".tab-button").forEach((button) => {
+        button.addEventListener("click", () => {
+          const tab = button.dataset.tab;
+          document.querySelectorAll(".tab-button").forEach((candidate) => {
+            candidate.setAttribute("aria-selected", String(candidate === button));
+          });
+          document.querySelectorAll(".tab-panel").forEach((panel) => {
+            panel.classList.toggle("is-active", panel.dataset.panel === tab);
+          });
+        });
+      });
+
+      const signalWeights = {
+        technical: 0.34,
+        decision: 0.22,
+        fact: 0.26,
+        steering: 0.22,
+        generic: -0.45,
+        org: 0.12,
+      };
+
+      const scopeSelect = document.querySelector("#scopeSelect");
+      const signalInputs = [...document.querySelectorAll("[data-signal]")];
+      const verdict = document.querySelector("#storageVerdict");
+      const title = document.querySelector("#storageTitle");
+      const body = document.querySelector("#storageBody");
+      const bar = document.querySelector("#storageBar");
+      const score = document.querySelector("#storageScore");
+      const kind = document.querySelector("#memoryKind");
+      const target = document.querySelector("#writeTarget");
+      const reason = document.querySelector("#storageReason");
+      const fallback = document.querySelector("#fallbackText");
+
+      function active(signal) {
+        return signalInputs.some((input) => input.dataset.signal === signal && input.checked);
+      }
+
+      function updateStorage() {
+        const scope = scopeSelect.value;
+        let rawScore = 0.08;
+        signalInputs.forEach((input) => {
+          if (input.checked) rawScore += signalWeights[input.dataset.signal] || 0;
+        });
+        if (scope === "global" && !active("org")) rawScore -= 0.55;
+        if (scope === "global" && active("steering") && !active("fact")) rawScore -= 0.18;
+        const normalized = Math.max(0, Math.min(1, rawScore));
+        const shouldStore = normalized >= 0.5;
+        const selectedKind = active("steering")
+          ? "steering"
+          : active("fact") && scope === "global"
+            ? "company_fact"
+            : active("fact")
+              ? "user_fact"
+              : "technical_insight";
+
+        verdict.textContent = shouldStore
+          ? `Store in ${scope === "global" ? "company memory" : "user memory"}`
+          : "Skip this conversation";
+        title.textContent = shouldStore
+          ? "This conversation has durable memory signals."
+          : "This is too generic or unsafe to store.";
+        body.textContent =
+          scope === "global"
+            ? "Shared memory must be grounded in user-provided company facts and must have org identity."
+            : "Private memory can include technical learning, user facts, preferences, and product steering.";
+        bar.style.width = `${Math.round(normalized * 100)}%`;
+        score.textContent = normalized.toFixed(2);
+        kind.textContent = shouldStore ? selectedKind : "none";
+        target.textContent = shouldStore ? "Neo4j + Chroma" : "no write";
+        fallback.textContent = "Regex heuristic if LLM triage fails";
+        reason.textContent = shouldStore
+          ? "The triage decision would allow extraction. The insight extractor would then create the minimum useful set of graph nodes instead of saving the whole chat."
+          : scope === "global" && !active("org")
+            ? "Global memory fails closed without company/org identity, even if the text seems useful."
+            : "The triage agent prefers false when unsure, so casual or generic sessions do not pollute retrieval.";
+      }
+
+      scopeSelect.addEventListener("change", updateStorage);
+      signalInputs.forEach((input) => input.addEventListener("change", updateStorage));
+      updateStorage();
+
+      const retrievalData = {
+        cors: [
+          {
+            label: "FastAPI CORS middleware order",
+            source: "user",
+            score: 0.91,
+            type: "Insight",
+            text:
+              "Prior session found preflight failures caused by middleware registration order. Move CORSMiddleware before route registration.",
+          },
+          {
+            label: "OPTIONS failure debugging trail",
+            source: "user",
+            score: 0.76,
+            type: "Problem",
+            text:
+              "Legacy node may include attempted solutions, resolved_by, related problems, affected file paths, and stack context.",
+          },
+        ],
+        design: [
+          {
+            label: "Dark Linear-like website steering",
+            source: "user",
+            score: 0.84,
+            type: "Insight",
+            text:
+              "Private steering says future Orange website work should keep a premium, dark, Linear-like direction.",
+          },
+          {
+            label: "Graph page should explain connectors visually",
+            source: "user",
+            score: 0.71,
+            type: "Insight",
+            text:
+              "Memory says connector/product explanation should be visual instead of only node-type cards.",
+          },
+        ],
+        company: [
+          {
+            label: "Markdown files for company memory",
+            source: "global",
+            score: 0.66,
+            type: "Insight",
+            text:
+              "Company-scoped fact: the org uses Markdown files as a memory source format. Visible only inside matching org_id.",
+          },
+          {
+            label: "Shared launch plan",
+            source: "global",
+            score: 0.58,
+            type: "Insight",
+            text:
+              "Company-scoped GTM or launch decisions can be returned at a lower effective global threshold.",
+          },
+        ],
+        generic: [],
+      };
+
+      const scoreSlider = document.querySelector("#scoreSlider");
+      const scoreReadout = document.querySelector("#scoreReadout");
+      const matches = document.querySelector("#matches");
+      let activeQuery = "cors";
+
+      function updateMatches() {
+        const threshold = Number(scoreSlider.value);
+        scoreReadout.textContent = threshold.toFixed(2);
+        const rows = retrievalData[activeQuery].filter((item) => {
+          const effectiveThreshold = item.source === "global" ? Math.min(threshold, 0.55) : threshold;
+          return item.score >= effectiveThreshold;
+        });
+        if (!rows.length) {
+          matches.innerHTML = `
+            <div class="match">
+              <div class="score">0.00</div>
+              <div>
+                <small>No match returned</small>
+                <h3>Recall stays quiet</h3>
+                <p>Low-signal or below-threshold queries do not add noisy context to the agent answer.</p>
+              </div>
+            </div>
+          `;
+          return;
+        }
+        matches.innerHTML = rows
+          .map(
+            (item) => `
+              <article class="match" data-source="${item.source}">
+                <div class="score">${item.score.toFixed(2)}</div>
+                <div>
+                  <small>${item.type} / ${item.source}</small>
+                  <h3>${item.label}</h3>
+                  <p>${item.text}</p>
+                </div>
+              </article>
+            `,
+          )
+          .join("");
+      }
+
+      document.querySelectorAll(".query-card").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".query-card").forEach((candidate) => candidate.classList.remove("is-active"));
+          button.classList.add("is-active");
+          activeQuery = button.dataset.query;
+          updateMatches();
+        });
+      });
+      scoreSlider.addEventListener("input", updateMatches);
+      updateMatches();
+    </script>
+  </body>
+</html>

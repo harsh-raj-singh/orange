@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
@@ -40,6 +43,17 @@ def _dt(value: datetime | None) -> datetime | None:
 def _scope(value: str | None) -> str:
     cleaned = (value or "user").strip().lower()
     return cleaned or "user"
+
+
+def _uuid_or_none(value: Any) -> str | None:
+    """Return a normalized UUID string for a verified auth subject."""
+
+    if value is None:
+        return None
+    try:
+        return str(UUID(str(value).strip()))
+    except (ValueError, AttributeError, TypeError):
+        return None
 
 
 class OrangePostgresStore:
@@ -170,10 +184,25 @@ class OrangePostgresStore:
         organization_name: str | None = None,
         user_metadata: dict[str, Any] | None = None,
     ) -> StoredSessionIngestion:
-        org_external_id = normalized.org_id or "default"
+        auth_user_id = _uuid_or_none(normalized.metadata.get("auth_user_id"))
+        owner_seed = (
+            auth_user_id
+            or normalized.user_id
+            or normalized.user_email
+            or normalized.session_id
+        ).strip().lower()
+        personal_org = f"personal-{hashlib.sha256(owner_seed.encode('utf-8')).hexdigest()[:16]}"
+        org_external_id = normalized.org_id or personal_org
+        explicit_organization = bool((normalized.org_id or "").strip())
+        org_slug = _slugify(org_external_id)
+        with self.pool.connection() as conn:
+            existing_org = conn.execute(
+                "select id from orange.organizations where slug = %s limit 1",
+                (org_slug,),
+            ).fetchone()
         organization_id = self.upsert_organization(
             external_org_id=org_external_id,
-            slug=org_external_id,
+            slug=org_slug,
             name=organization_name or org_external_id,
             metadata={"source": normalized.source.value},
         )
@@ -182,13 +211,42 @@ class OrangePostgresStore:
         if normalized.user_id or normalized.user_email:
             user_id = self.upsert_user(
                 external_user_id=normalized.user_id or normalized.user_email or "",
+                auth_user_id=auth_user_id,
                 email=normalized.user_email,
                 display_name=normalized.user_id or normalized.user_email,
                 metadata=user_metadata or {},
             )
-            self.upsert_membership(organization_id=organization_id, user_id=user_id)
+            if explicit_organization and existing_org:
+                with self.pool.connection() as conn:
+                    membership = conn.execute(
+                        """
+                        select 1
+                        from orange.organization_members
+                        where organization_id = %s and user_id = %s
+                        limit 1
+                        """,
+                        (organization_id, user_id),
+                    ).fetchone()
+                if not membership:
+                    raise PermissionError(
+                        "The authenticated user is not a member of this Orange organization."
+                    )
+            else:
+                self.upsert_membership(
+                    organization_id=organization_id,
+                    user_id=user_id,
+                    membership_role="owner" if not existing_org else "member",
+                )
 
         payload = normalized.ingestion_metadata()
+        request_hash = hashlib.sha256(
+            json.dumps(
+                payload,
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
         ingestion_scope = _scope(normalized.metadata.get("scope"))
         with self.pool.connection() as conn:
             with conn.transaction():
@@ -222,7 +280,12 @@ class OrangePostgresStore:
                       ended_at = excluded.ended_at,
                       ingested_at = excluded.ingested_at,
                       message_count = excluded.message_count,
-                      status = excluded.status,
+                      status = case
+                        when orange.session_ingestions.normalized_payload = excluded.normalized_payload
+                             and orange.session_ingestions.status = 'processed'
+                        then orange.session_ingestions.status
+                        else excluded.status
+                      end,
                       metadata = excluded.metadata,
                       normalized_payload = excluded.normalized_payload
                     returning id
@@ -287,13 +350,44 @@ class OrangePostgresStore:
 
                 job = conn.execute(
                     """
-                    insert into orange.memory_write_jobs (ingestion_id, status)
-                    values (%s, 'queued')
+                    insert into orange.memory_write_jobs (ingestion_id, status, request_hash)
+                    values (%s, 'queued', %s)
                     on conflict (ingestion_id)
-                    do update set status = orange.memory_write_jobs.status
+                    do update set
+                      request_hash = excluded.request_hash,
+                      status = case
+                        when orange.memory_write_jobs.request_hash is distinct from excluded.request_hash
+                             and orange.memory_write_jobs.status <> 'running'
+                        then 'queued'
+                        else orange.memory_write_jobs.status
+                      end,
+                      attempt_count = case
+                        when orange.memory_write_jobs.request_hash is distinct from excluded.request_hash
+                             and orange.memory_write_jobs.status <> 'running'
+                        then 0
+                        else orange.memory_write_jobs.attempt_count
+                      end,
+                      available_at = case
+                        when orange.memory_write_jobs.request_hash is distinct from excluded.request_hash
+                             and orange.memory_write_jobs.status <> 'running'
+                        then now()
+                        else orange.memory_write_jobs.available_at
+                      end,
+                      result = case
+                        when orange.memory_write_jobs.request_hash is distinct from excluded.request_hash
+                             and orange.memory_write_jobs.status <> 'running'
+                        then '{}'::jsonb
+                        else orange.memory_write_jobs.result
+                      end,
+                      error = case
+                        when orange.memory_write_jobs.request_hash is distinct from excluded.request_hash
+                             and orange.memory_write_jobs.status <> 'running'
+                        then null
+                        else orange.memory_write_jobs.error
+                      end
                     returning id
                     """,
-                    (ingestion_id,),
+                    (ingestion_id, request_hash),
                 ).fetchone()
 
         return StoredSessionIngestion(

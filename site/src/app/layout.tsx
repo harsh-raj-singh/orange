@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import SiteMotion from "@/components/site-motion";
+import OrangeVoiceWidget from "@/components/orange-voice-widget";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Orange | Memory Fabric for Agentic Engineering",
+  title: "Orange | Persistent memory for coding agents",
   description:
-    "Orange captures developer sessions from agentic tools and retrieves graph-backed context when future agents need it.",
+    "Orange preserves decisions, failed attempts, fixes, and evidence from one agent session so the next agent can continue with context.",
 };
 
 export default function RootLayout({
@@ -32,6 +33,7 @@ export default function RootLayout({
       <body className="min-h-full antialiased">
         <SiteMotion />
         {children}
+        <OrangeVoiceWidget />
       </body>
     </html>
   );

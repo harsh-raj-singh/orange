@@ -1,11 +1,24 @@
 # Cleanup Notes
 
-| Area | Left Intentionally Untouched | Reason |
-| --- | --- | --- |
-| `core/graph_deduplication.py` | Oversized legacy graph-deduplication routines | Not on the active MCP/v2 writer path in tests, but could still be used by older Streamlit flows. Refactoring would be architectural. |
-| `core/complete_chat_system.py` | Large `process_chat`, `_process_graph_concepts`, and retrieval methods | Still used by Streamlit/Slack legacy runtime paths. Cleanup removed dead vector code and broken runner calls only. |
-| `core/graph_upsert/writer.py` | Oversized write helpers | High-risk persistence code covered by focused tests; no dead branches were obvious enough to remove safely. |
-| `core/mcp_server/handlers.py` | Oversized MCP handler functions | Public MCP signatures and response shapes are externally depended on. |
-| `site/package.json` | `@tailwindcss/postcss`, `tailwindcss`, `@types/node`, `@types/react-dom` | `depcheck` reports these as unused, but they are framework/config/type dependencies used by Next, Tailwind CSS, PostCSS, or Node-based scripts. |
-| `site/package-lock.json` | `npm audit --omit=dev` reports a moderate PostCSS advisory through `next@16.2.6` | `npm audit fix --force` proposes a breaking downgrade to `next@9.3.3`; `npm view next version` reports `16.2.6` as latest, so this needs an upstream Next release rather than a local cleanup change. |
-| `requirements.txt` | `sentence-transformers`, `uvicorn`, `dspy-ai` | Import usage is indirect or runtime-specific: Chroma's embedding function loads sentence transformers, `uvicorn` runs the FastAPI app, and DSPy imports as `dspy`. |
+Orange has one production memory architecture:
+
+```text
+completed session
+-> durable Postgres job
+-> triage + scoped Insight extraction
+-> transactional Session/Insight/edge + pgvector write
+-> scoped recall and live graph-version refresh
+```
+
+Neo4j, Memgraph, Chroma, copied MCP bearer tokens, and their deployment scripts
+have been removed from the production path and dependencies.
+
+The old fake Neo4j/Chroma writer/query modules remain temporarily as isolated
+test compatibility fixtures for historical regression coverage. No API, MCP,
+Slack, worker, or UI code imports them at runtime. They can be deleted together
+when those legacy regression tests are converted to repository-level fixtures.
+
+The static frontend graph is intentionally retained as a signed-out/offline
+product preview. Authenticated users never fall back from one identity to
+another user's live data; the last successful authorized snapshot is retained
+during a transient backend outage.
