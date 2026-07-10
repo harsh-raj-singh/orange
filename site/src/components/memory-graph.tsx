@@ -210,8 +210,8 @@ const visibleFallbackEdges = fallbackEdges.filter(
 );
 
 const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
-  { value: "user", label: "My Memory" },
-  { value: "global", label: "Global" },
+  { value: "user", label: "Private memory" },
+  { value: "global", label: "Company memory" },
 ];
 
 const memoryKindStyles: Record<MemoryKind, { accent: string; bg: string; border: string; text: string }> = {
@@ -1257,7 +1257,7 @@ function MemoryGraphInner() {
     <div className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] ${introVisible ? "graph-in-view" : ""}`}>
       <div className="flex flex-col gap-3 rounded-lg border border-[#24352d]/10 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between lg:col-span-2">
         <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#5f746b]">
-          Memory scope
+          Show memories from
         </p>
         <div className="grid grid-cols-2 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
           {scopeOptions.map((option) => (
@@ -1319,17 +1319,17 @@ function MemoryGraphInner() {
         {hasLoadedGraph && memoryNodeList.length === 0 ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
             <div className="max-w-sm rounded-lg border border-dashed border-[#9aa79d] bg-white/92 px-5 py-4 text-sm leading-6 text-[#536057] shadow-sm">
-              No notes are visible in this scope yet. Complete a conversation with matching profile details to create private or shared memory here.
+              Nothing has been saved in this scope yet. Finish a useful conversation in the demo below—or write through MCP—to create the first memory.
             </div>
           </div>
         ) : null}
 
         <div className="pointer-events-none absolute left-5 top-5 rounded-md border border-[#24352d]/10 bg-white/88 px-3 py-2 shadow-sm backdrop-blur">
           <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#c5551c]">
-            Live neighborhood
+            Graph status
           </p>
           <p className="mt-1 text-xs text-[#536057]">
-            {memoryNodeList.length} nodes {isRefreshing ? "syncing" : "linked"}
+            {memoryNodeList.length} {memoryNodeList.length === 1 ? "memory" : "memories"} {isRefreshing ? "updating" : "connected"}
           </p>
           <p
             aria-live="polite"
@@ -1342,17 +1342,17 @@ function MemoryGraphInner() {
             }`}
           >
             {graphSyncState === "live"
-              ? "live storage sync"
+              ? "live · watching for changes"
               : graphSyncState === "stale"
-                ? "reconnecting · last live view"
-                : "demo preview"}
+                ? "reconnecting · showing last update"
+                : "sample graph · sign in for yours"}
           </p>
         </div>
       </div>
 
       <aside className="rounded-lg border border-[#24352d]/10 bg-white p-5 shadow-[0_18px_46px_rgba(36,53,45,0.10)]">
         <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-[#2f6f5e]">
-          Selected node
+          Memory details
         </p>
         <h3 className="mt-4 text-2xl font-semibold text-[#161b18]">{selectedNode?.label}</h3>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -1404,7 +1404,7 @@ function MemoryGraphInner() {
             ) : null}
             {selectedNode.how ? (
               <div>
-                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#2f7f78]">How</dt>
+                <dt className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#2f7f78]">Resolution</dt>
                 <dd className="mt-1 leading-6">{selectedNode.how}</dd>
               </div>
             ) : null}
@@ -1430,17 +1430,17 @@ function MemoryGraphInner() {
         ) : null}
         {selectedScope === "global" ? (
           <p className="mt-3 rounded-md border border-[#6f61b5]/15 bg-[#f5f2ff] px-3 py-2 text-sm leading-6 text-[#55479a]">
-            Contributed anonymously from shared sessions
+            Visible to members of this company memory space
           </p>
         ) : null}
         <div className="mt-5 rounded-md bg-[#f7f3e8] p-4 text-sm leading-6 text-[#3f4b44]">
           {detailLoadingId === selectedNode?.id ? (
-            <span className="text-[#6b746e]">Loading node context...</span>
+            <span className="text-[#6b746e]">Loading the stored context...</span>
           ) : (
             <>
               {selectedNode?.detailTitle ? <p className="font-semibold text-[#24352d]">{selectedNode.detailTitle}</p> : null}
               <p className={selectedNode?.detailTitle ? "mt-2" : undefined}>
-                {selectedNode?.detailBody ?? "Click the node again to load its stored context."}
+                {selectedNode?.detailBody ?? "Select this memory again to load its full stored context."}
               </p>
             </>
           )}
@@ -1499,7 +1499,7 @@ function MemoryGraphInner() {
         ) : null}
         {selectedNode?.nextActions?.length ? (
           <div className="mt-5">
-            <p className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Next</p>
+            <p className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#879189]">Next actions</p>
             <ul className="mt-2 space-y-2 text-sm leading-6 text-[#536057]">
               {selectedNode.nextActions.slice(0, 3).map((item) => (
                 <li key={item}>{item}</li>

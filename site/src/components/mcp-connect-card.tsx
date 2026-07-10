@@ -15,7 +15,7 @@ const TABS: { id: ClientTab; label: string }[] = [
   { id: "grok", label: "Grok CLI" },
   { id: "claude", label: "Claude" },
   { id: "chatgpt", label: "ChatGPT" },
-  { id: "generic", label: "Generic MCP" },
+  { id: "generic", label: "Other clients" },
 ];
 
 const CLIENT_SETUP: Record<
@@ -29,36 +29,36 @@ const CLIENT_SETUP: Record<
 > = {
   grok: {
     summary:
-      "Add the remote URL as orange-remote first so a working local stdio orange entry is not overwritten. Grok opens browser login, stores the session, and refreshes tokens—no secrets to paste.",
+      "Add Orange as a separate remote server, then authenticate once in Grok. Your existing local server stays untouched.",
     commands: [
       {
-        label: "Add remote (safe default name)",
+        label: "Run in your terminal",
         value: `grok mcp add --scope user --transport http orange-remote ${ORANGE_MCP_URL}`,
       },
       {
-        label: "Optional helper",
-        value: "python scripts/configure_mcp.py grok remote",
+        label: "Verify after sign-in",
+        value: "grok mcp doctor orange-remote --json",
       },
     ],
     steps: [
       {
-        title: "Add orange-remote",
-        body: "Run the command once. The default name is orange-remote so local stdio orange is left alone.",
+        title: "Add the remote server",
+        body: "Run the command above. It registers the shared Orange endpoint as orange-remote.",
       },
       {
-        title: "Open /mcps",
-        body: "Launch Grok, enter /mcps, select orange-remote, then press i to start authentication.",
+        title: "Authenticate in Grok",
+        body: "Open /mcps, choose orange-remote, and press i. Grok opens the Orange sign-in page.",
       },
       {
-        title: "Browser sign-in",
-        body: "Finish the Orange email login and consent, then return to Grok and verify tools.",
+        title: "Confirm the connection",
+        body: "Return to Grok and ask it to call orange_status. A healthy connection exposes 11 tools.",
       },
     ],
-    tip: "After remote login and tools work, promote with: grok mcp remove orange && grok mcp add --scope user --transport http orange <url>. The helper refuses to overwrite an existing name unless you pass --force.",
+    tip: "Keep the name orange-remote while testing. Rename it only after browser login and a memory write both succeed.",
   },
   claude: {
     summary:
-      "Point Claude Code or Claude.ai at the same Streamable HTTP URL. OAuth discovery and PKCE handle credentials in the browser.",
+      "Claude Code and Claude.ai use the same endpoint and the same per-user browser sign-in.",
     commands: [
       {
         label: "Claude Code",
@@ -78,52 +78,48 @@ const CLIENT_SETUP: Record<
     ],
     steps: [
       {
-        title: "Register the server",
-        body: "Use the CLI command or drop the JSON fragment into your Claude MCP config.",
+        title: "Add Orange",
+        body: "Run the Claude Code command, or add the JSON block to your project MCP configuration.",
       },
       {
-        title: "Approve access",
-        body: "When Claude prompts, complete Orange sign-in and consent in the browser.",
+        title: "Connect your account",
+        body: "Open /mcp in Claude Code and complete the Orange browser sign-in when prompted.",
       },
       {
-        title: "Use memory tools",
-        body: "Call recall_memory before work and complete_conversation when a useful session ends.",
+        title: "Test one recall",
+        body: "Ask Claude to call orange_status, then recall_memory for the task you are about to start.",
       },
     ],
-    tip: "Claude.ai custom connectors use the same URL. Do not paste a bearer token.",
+    tip: "In Claude.ai, add the URL under Customize → Connectors → Add custom connector. Leave client credentials empty unless your workspace requires them.",
   },
   chatgpt: {
     summary:
-      "Connect Orange through ChatGPT Developer mode as a developer-mode App (remote MCP). This is not Custom GPT Actions.",
+      "Add Orange as a developer-mode App. ChatGPT scans the MCP tools and sends you through the same Orange sign-in.",
     commands: [
       {
-        label: "MCP URL (paste into the developer-mode app)",
+        label: "Paste this MCP URL",
         value: ORANGE_MCP_URL,
-      },
-      {
-        label: "OpenAI docs",
-        value: "https://developers.openai.com/api/docs/guides/developer-mode",
       },
     ],
     steps: [
       {
         title: "Enable Developer mode",
-        body: "In ChatGPT (web), open Settings → Security and login (or Settings → Apps → Advanced Settings) and turn on Developer mode. Workspace admins may need to allow this first.",
+        body: "In ChatGPT web, open Settings → Security and login and enable Developer mode.",
       },
       {
-        title: "Create a developer-mode App",
-        body: "Open Settings → Plugins (chatgpt.com/plugins) or Apps → Create. Use + to create a developer-mode app for a remote MCP server (SSE or streaming HTTP).",
+        title: "Create the Orange app",
+        body: "Open Settings → Plugins/Apps, create a developer-mode app, and paste the URL above.",
       },
       {
-        title: "Point at Orange + OAuth",
-        body: "Paste the Orange MCP URL, choose OAuth (not a static secret), click Scan Tools, complete browser login/consent, then Create. Use the app from the composer’s Developer mode tool.",
+        title: "Scan and sign in",
+        body: "Choose OAuth, scan tools, complete Orange sign-in, and create the app. Then enable Orange from the chat composer.",
       },
     ],
-    tip: "Do not use Custom GPT Actions for Orange. ChatGPT’s MCP path is Developer mode + a developer-mode App. Write tools may ask for confirmation; Orange marks recall tools readOnlyHint.",
+    tip: "Orange is an MCP app, not a Custom GPT Action. ChatGPT may ask for confirmation before write tools save memory.",
   },
   generic: {
     summary:
-      "Any MCP client that supports Streamable HTTP + OAuth can use the same endpoint. One backend, every provider.",
+      "Any client that supports Streamable HTTP and MCP OAuth can connect without an Orange-specific plugin.",
     commands: [
       {
         label: "MCP URL",
@@ -147,19 +143,19 @@ const CLIENT_SETUP: Record<
     ],
     steps: [
       {
-        title: "Point at the URL",
-        body: "Configure type http (or streamable-http) with the Orange URL only.",
+        title: "Add the endpoint",
+        body: "Configure an HTTP or streamable-http MCP server using the Orange URL only.",
       },
       {
-        title: "Let OAuth run",
-        body: "The client discovers the resource, registers dynamically, runs PKCE, and opens the browser.",
+        title: "Complete sign-in",
+        body: "A compatible client discovers OAuth automatically and opens the Orange login page.",
       },
       {
-        title: "Scope is automatic",
-        body: "Orange scopes memory to the signed-in Supabase user. Client-supplied emails cannot impersonate another user.",
+        title: "Verify the tools",
+        body: "Call orange_status. Orange uses the verified account—not a client-supplied email—to scope private memory.",
       },
     ],
-    tip: "Unauthenticated POSTs to /mcp return 401 with a WWW-Authenticate resource_metadata challenge.",
+    tip: "If your client asks for a static token instead of opening a browser, it does not support Orange’s remote OAuth flow yet.",
   },
 };
 
@@ -200,27 +196,27 @@ export default function McpConnectCard() {
   const setup = CLIENT_SETUP[tab];
 
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.05] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.28)] sm:p-6">
-      <div className="flex flex-col gap-3 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.07] p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#101713]/90 shadow-[0_30px_100px_rgba(0,0,0,0.34)]">
+      <div className="flex flex-col gap-4 border-b border-white/10 bg-[linear-gradient(120deg,rgba(249,115,22,0.12),rgba(98,212,156,0.05))] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-7">
         <div>
-          <p className="text-sm font-semibold text-white">Connect Orange—one URL for every MCP client</p>
+          <p className="text-lg font-semibold text-white">One endpoint, one account, the same memory everywhere.</p>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-[#cbd8cf]">
-            Browser OAuth with discovery, PKCE, and dynamic client registration. Your client stores the session; you never copy a token or key.
+            Choose your client below. You will add the URL, sign in in your browser, and verify the connection with one tool call.
           </p>
         </div>
-        <span className="w-fit shrink-0 rounded-full border border-emerald-200/20 bg-emerald-200/10 px-3 py-1.5 font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-emerald-100">
-          URL only
+        <span className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full border border-emerald-200/20 bg-emerald-200/10 px-3 py-1.5 font-mono text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-emerald-100">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> No keys to copy
         </span>
       </div>
 
-      <div className="mt-5">
+      <div className="px-5 pt-5 sm:px-7 sm:pt-7">
         <CodeBlock label="Shared MCP endpoint" value={ORANGE_MCP_URL} />
       </div>
 
       <div
         role="tablist"
         aria-label="MCP client setup"
-        className="mt-5 flex flex-wrap gap-2"
+        className="mx-5 mt-5 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/20 p-1.5 sm:mx-7 sm:grid-cols-4"
       >
         {TABS.map((item) => {
           const selected = tab === item.id;
@@ -229,12 +225,14 @@ export default function McpConnectCard() {
               key={item.id}
               type="button"
               role="tab"
+              id={`mcp-tab-${item.id}`}
+              aria-controls={`mcp-panel-${item.id}`}
               aria-selected={selected}
               onClick={() => setTab(item.id)}
               className={
                 selected
-                  ? "rounded-md border border-[#f97316]/50 bg-[#f97316]/15 px-3 py-2 text-xs font-semibold text-white"
-                  : "rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-[#b8c3ba] transition hover:border-white/25 hover:text-white"
+                  ? "rounded-lg bg-[#f97316] px-3 py-2.5 text-xs font-semibold text-white shadow-[0_10px_28px_rgba(249,115,22,0.22)]"
+                  : "rounded-lg px-3 py-2.5 text-xs font-semibold text-[#9eaaa2] transition hover:bg-white/[0.05] hover:text-white"
               }
             >
               {item.label}
@@ -243,46 +241,53 @@ export default function McpConnectCard() {
         })}
       </div>
 
-      <div role="tabpanel" className="mt-5 space-y-4">
-        <p className="text-sm leading-6 text-[#cbd8cf]">{setup.summary}</p>
+      <div
+        role="tabpanel"
+        id={`mcp-panel-${tab}`}
+        aria-labelledby={`mcp-tab-${tab}`}
+        className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[0.9fr_1.1fr]"
+      >
+        <div>
+          <p className="text-base leading-7 text-[#d8e2da]">{setup.summary}</p>
 
-        <div className="grid gap-3">
+          <div className="mt-5 grid gap-3">
           {setup.commands.map((command) => (
             <CodeBlock key={command.label} label={command.label} value={command.value} />
           ))}
+          </div>
+
+          <div className="mt-4 rounded-xl border border-[#f97316]/20 bg-[#f97316]/[0.07] p-4 text-sm leading-6 text-[#dbe7df]">
+            <p className="font-semibold text-[#ffc28f]">Good to know</p>
+            <p className="mt-1 text-[#b8c3ba]">{setup.tip}</p>
+          </div>
         </div>
 
-        <ol className="grid gap-3 md:grid-cols-3">
+        <ol className="grid gap-3">
           {setup.steps.map((step, index) => (
-            <li key={step.title} className="rounded-lg border border-white/10 bg-black/20 p-4">
-              <span className="font-mono text-xs font-semibold text-[#f9a66b]">
+            <li key={step.title} className="grid grid-cols-[2.25rem_1fr] gap-3 rounded-xl border border-white/10 bg-white/[0.035] p-4">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full border border-[#f97316]/30 bg-[#f97316]/10 font-mono text-xs font-semibold text-[#f9a66b]">
                 {String(index + 1).padStart(2, "0")}
               </span>
-              <p className="mt-3 text-sm font-semibold text-white">{step.title}</p>
-              <p className="mt-2 text-sm leading-6 text-[#b8c3ba]">{step.body}</p>
+              <div>
+                <p className="text-sm font-semibold text-white">{step.title}</p>
+                <p className="mt-1 text-sm leading-6 text-[#aebbb2]">{step.body}</p>
+              </div>
             </li>
           ))}
         </ol>
-
-        <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm leading-6 text-[#dbe7df]">
-          <p className="font-semibold text-white">Tip</p>
-          <p className="mt-2 text-[#b8c3ba]">{setup.tip}</p>
-        </div>
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm leading-6 text-[#dbe7df]">
-          <p className="font-semibold text-white">Memory protocol</p>
+      <div className="grid gap-px border-t border-white/10 bg-white/10 md:grid-cols-2">
+        <div className="bg-[#0d1210] p-5 text-sm leading-6 text-[#dbe7df] sm:p-6">
+          <p className="font-semibold text-white">How agents use Orange</p>
           <p className="mt-2">
-            <span className="font-mono text-[#f9a66b]">recall_memory</span> before work,{" "}
-            <span className="font-mono text-[#f9a66b]">checkpoint_context</span> for mid-session finds,{" "}
-            <span className="font-mono text-[#f9a66b]">complete_conversation</span> once when done.
+            Recall before starting, checkpoint a critical finding, and complete the conversation once useful work is finished.
           </p>
         </div>
-        <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm leading-6 text-[#dbe7df]">
-          <p className="font-semibold text-white">Live graph refresh</p>
+        <div className="bg-[#0d1210] p-5 text-sm leading-6 text-[#dbe7df] sm:p-6">
+          <p className="font-semibold text-white">What stays consistent</p>
           <p className="mt-2">
-            Nodes written through any MCP client bump the scoped graph version. The Orange UI polls that version and refreshes automatically.
+            Every client writes to the same scoped Postgres graph. New nodes appear in the Orange UI without a manual refresh.
           </p>
         </div>
       </div>

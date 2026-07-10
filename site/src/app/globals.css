@@ -17,10 +17,20 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+section[id] {
+  scroll-margin-top: 4rem;
+}
+
+:focus-visible {
+  outline: 2px solid #ff9f5f;
+  outline-offset: 3px;
 }
 
 ::selection {
@@ -82,14 +92,30 @@ html[data-scrolled] .site-nav {
 }
 
 .orange-tagline {
-  max-width: 480px;
   margin-top: 2rem;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 1.05rem;
-  font-style: italic;
-  line-height: 1.65;
-  letter-spacing: 0.01em;
-  opacity: 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 1;
+}
+
+.orange-tagline span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.orange-tagline span::before {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: #ff9f5f;
+  content: "";
+  box-shadow: 0 0 14px rgba(255, 159, 95, 0.5);
 }
 
 .hero-word-mask > span,

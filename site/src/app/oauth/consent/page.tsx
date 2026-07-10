@@ -8,6 +8,13 @@ type ConsentPageProps = {
 
 export const dynamic = "force-dynamic";
 
+const scopeLabels: Record<string, string> = {
+  openid: "Verify your Orange account",
+  email: "Use your verified email to isolate private memory",
+  profile: "Read basic account details",
+  offline_access: "Stay connected when the client refreshes its session",
+};
+
 export default async function ConsentPage({ searchParams }: ConsentPageProps) {
   const { authorization_id: authorizationId } = await searchParams;
   if (!authorizationId) {
@@ -31,25 +38,30 @@ export default async function ConsentPage({ searchParams }: ConsentPageProps) {
   const scopes = details.scope.split(" ").filter(Boolean);
 
   return (
-    <main className="min-h-screen bg-[#0d1210] px-5 py-12 text-white sm:px-8">
-      <section className="mx-auto max-w-xl rounded-xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl sm:p-8">
-        <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#f9a66b]">ORANGE MCP</p>
-        <h1 className="mt-4 text-4xl font-semibold">Allow {details.client.name} to use Orange?</h1>
+    <main className="relative flex min-h-screen items-center overflow-hidden bg-[#0a0f0c] px-5 py-12 text-white sm:px-8">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(249,115,22,0.18),transparent_34%)]" />
+      <section className="relative mx-auto w-full max-w-xl rounded-2xl border border-white/10 bg-[#111713]/95 p-6 shadow-[0_30px_100px_rgba(0,0,0,0.42)] sm:p-8">
+        <div className="flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#f9a66b]">
+          <span className="h-2 w-2 rounded-full bg-[#f97316]" /> Orange MCP connection
+        </div>
+        <h1 className="mt-5 text-balance text-4xl font-semibold">Connect {details.client.name} to your memory?</h1>
         <p className="mt-4 text-sm leading-6 text-[#b8c3ba]">
-          Signed in as <span className="font-semibold text-white">{userData.user.email}</span>. Orange will use this verified identity to isolate your private memory.
+          You are signed in as <span className="font-semibold text-white">{userData.user.email}</span>. If you continue, this client can use Orange&apos;s memory tools on your behalf.
         </p>
 
-        <div className="mt-7 rounded-lg border border-white/10 bg-black/20 p-4">
-          <p className="text-sm font-semibold">Requested access</p>
+        <div className="mt-7 rounded-xl border border-white/10 bg-black/20 p-4">
+          <p className="text-sm font-semibold">This connection can</p>
           <ul className="mt-3 grid gap-2 text-sm text-[#cbd8cf]">
             {scopes.map((scope) => (
               <li key={scope} className="flex items-center gap-2">
                 <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[#f97316]" />
-                {scope}
+                {scopeLabels[scope] ?? scope}
               </li>
             ))}
           </ul>
         </div>
+
+        <p className="mt-4 text-xs leading-5 text-[#849188]">Orange never gives the client your password. You can remove the MCP connection from the client at any time.</p>
 
         <form action="/api/oauth/decision" method="post" className="mt-7 grid grid-cols-2 gap-3">
           <input type="hidden" name="authorization_id" value={authorizationId} />
@@ -59,7 +71,7 @@ export default async function ConsentPage({ searchParams }: ConsentPageProps) {
             value="deny"
             className="h-11 rounded-lg border border-white/15 text-sm font-bold text-[#d4ddd7] transition hover:border-white/30"
           >
-            Deny
+            Cancel
           </button>
           <button
             type="submit"
@@ -67,7 +79,7 @@ export default async function ConsentPage({ searchParams }: ConsentPageProps) {
             value="approve"
             className="h-11 rounded-lg bg-[#f26d21] text-sm font-bold text-white transition hover:bg-[#ff7a2a]"
           >
-            Allow access
+            Connect client
           </button>
         </form>
       </section>

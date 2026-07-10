@@ -56,7 +56,13 @@ const profileFields: ReadonlyArray<{
   type?: string;
   multiline?: boolean;
 }> = [
-  { id: "company", label: "Company", placeholder: "Acme Cloud" },
+  { id: "company", label: "Company memory space", placeholder: "Acme Cloud" },
+];
+
+const starterPrompts = [
+  "We fixed a CORS preflight failure by moving middleware before the router.",
+  "Remember that we chose Supabase session pooling for IPv4 hosting.",
+  "What context do you already have about the Orange MCP migration?",
 ];
 
 function createId(prefix: string) {
@@ -68,7 +74,7 @@ function createId(prefix: string) {
 }
 
 function getAssistantText(data: ChatResponse) {
-  return data.message ?? data.content ?? data.reply ?? "I saved that turn, but the demo did not return a response.";
+  return data.message ?? data.content ?? data.reply ?? "The turn was received, but Orange did not return a chat response.";
 }
 
 function parseServerEventBlock(block: string) {
@@ -258,7 +264,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
     event.preventDefault();
 
     if (!isProfileReady) {
-      setError("Sign in and add your company to start the demo.");
+      setError("Add a company memory space before starting the session.");
       return;
     }
 
@@ -304,7 +310,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
 
       if (!response.ok) {
         const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(errorBody?.error ?? "Chat request failed.");
+        throw new Error(errorBody?.error ?? "Orange could not send this message. Please try again.");
       }
 
       const contentType = response.headers.get("content-type") ?? "";
@@ -409,7 +415,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
       setError(
         error instanceof Error
           ? error.message
-          : "Orange could not reach the demo chat endpoint. Try again in a moment.",
+          : "Orange could not reach the chat service. Try again in a moment.",
       );
     } finally {
       setIsSending(false);
@@ -424,7 +430,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
       const completion = await completeConversation("user_done");
       setSaveStatus(completion?.persisted === false ? null : "backend");
     } catch {
-      setError("Orange could not mark this conversation done. Your chat is still here.");
+      setError("Orange could not save this session yet. Your conversation is still available here.");
     } finally {
       setIsCompleting(false);
     }
@@ -434,19 +440,19 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
     return (
       <section className="rounded-lg border border-[#24352d]/10 bg-white p-6 shadow-[0_24px_70px_rgba(36,53,45,0.10)] sm:p-8">
         <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-[#c5551c]">
-          Account required
+          Sign in to try Orange
         </p>
         <h2 className="mt-3 text-2xl font-semibold text-[#161b18]">
-          Sign in to use your private memory.
+          Use your own memory, not the public preview.
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-[#536057]">
-          The graph above stays in safe preview mode until you sign in. Chat, recall, and saved conversations use your verified Supabase identity.
+          The graph above is sample data. Sign in to create private memories, recall them in chat, and watch your own graph update.
         </p>
         <a
           href="/login?next=%2F%23try"
           className="mt-6 inline-flex h-11 items-center justify-center rounded-md bg-[#24352d] px-5 text-sm font-bold text-white transition hover:bg-[#c5551c]"
         >
-          Sign in securely
+          Sign in with email
         </a>
       </section>
     );
@@ -458,11 +464,11 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
         <div className="mb-5 flex flex-col gap-2 border-b border-[#24352d]/10 pb-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-[#c5551c]">
-              Start a session
+              Set up this test session
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-[#161b18]">Start a test session</h2>
+            <h2 className="mt-2 text-2xl font-semibold text-[#161b18]">Choose where this memory belongs.</h2>
           </div>
-          <p className="font-mono text-xs text-[#5f746b]">verified account · company required</p>
+          <p className="font-mono text-xs text-[#5f746b]">verified account · scoped storage</p>
         </div>
 
         <form className="grid gap-4 md:grid-cols-2" onSubmit={submitProfile}>
@@ -496,10 +502,10 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
             />
             <span>
               <span className="block text-sm font-semibold text-[#24352d]">
-                Share technical knowledge with global knowledge base
+                Also save reusable technical insights to company memory
               </span>
               <span className="mt-1 block text-xs text-[#5f746b]">
-                (Personal details are never shared)
+                Private facts stay in your personal scope. Only durable, reusable knowledge is eligible for the company graph.
               </span>
             </span>
           </label>
@@ -513,7 +519,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
               className="inline-flex h-11 items-center justify-center rounded-md bg-[#24352d] px-5 text-sm font-bold text-white shadow-[0_14px_36px_rgba(36,53,45,0.16)] transition hover:bg-[#c5551c] disabled:cursor-not-allowed disabled:opacity-55"
               disabled={!isProfileReady}
             >
-              Open chat
+              Start memory session
             </button>
           </div>
         </form>
@@ -526,7 +532,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
       <div className="flex flex-col gap-3 border-b border-[#24352d]/10 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-[#2f6f5e]">
-            Test chat
+            Memory capture session
           </p>
           <h2 className="mt-1 text-xl font-semibold text-[#161b18]">
             {verifiedEmail} · {profile.company}
@@ -539,7 +545,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
             disabled={!hasUnsavedMessages || isCompleting || isSending}
             onClick={markDone}
           >
-            {isCompleting ? "Saving..." : "Mark conversation done"}
+            {isCompleting ? "Saving memory..." : "Finish & save memory"}
           </button>
           <p
             className={`text-xs ${
@@ -551,9 +557,9 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
             }`}
           >
             {saveStatus === "backend"
-                ? "Saved to backend memory."
+                ? "Saved. The graph will refresh automatically."
                 : hasUnsavedMessages
-                  ? "Unsaved changes in this conversation."
+                  ? "Finish the session to extract durable memory."
                   : "."}
           </p>
         </div>
@@ -563,7 +569,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
         <aside className="border-b border-[#24352d]/10 bg-[#f7f3e8] p-5 lg:border-b-0 lg:border-r">
           <dl className="grid gap-4 text-sm">
             <div>
-              <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Company</dt>
+              <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Memory space</dt>
               <dd className="mt-1 font-semibold text-[#24352d]">{profile.company}</dd>
             </div>
             <div>
@@ -571,9 +577,9 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
               <dd className="mt-1 font-semibold text-[#24352d]">{verifiedEmail}</dd>
             </div>
             <div>
-              <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Sharing</dt>
+              <dt className="font-mono text-xs uppercase tracking-[0.16em] text-[#8f3b14]">Write scope</dt>
               <dd className="mt-1 font-semibold text-[#24352d]">
-                {contributeToGlobal ? "Shared knowledge on" : "Private session only"}
+                {contributeToGlobal ? "Private + company insights" : "Private memory only"}
               </dd>
             </div>
           </dl>
@@ -582,8 +588,21 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
         <div className="flex min-h-[520px] flex-col">
           <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5" aria-live="polite">
             {messages.length === 0 ? (
-              <div className="rounded-md border border-dashed border-[#9aa79d] bg-white px-4 py-6 text-sm leading-6 text-[#536057]">
-                Ask the demo about a project memory, a debugging path, or a decision you want retained.
+              <div className="rounded-lg border border-dashed border-[#9aa79d] bg-white px-5 py-6 text-sm leading-6 text-[#536057]">
+                <p className="font-semibold text-[#24352d]">Start with something worth remembering.</p>
+                <p className="mt-1">Describe a decision or fix, or ask Orange what it already knows.</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {starterPrompts.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => setDraft(prompt)}
+                      className="rounded-full border border-[#24352d]/12 bg-[#f7f3e8] px-3 py-1.5 text-left text-xs font-medium text-[#3f4b44] transition hover:border-[#c5551c]/40 hover:text-[#8f3b14]"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : (
               messages.map((message) => (
@@ -626,7 +645,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
 
             {isSending ? (
               <div className="max-w-40 rounded-lg border border-[#d8ded7] bg-white px-4 py-3 text-sm text-[#536057] shadow-sm">
-                Orange is thinking...
+                Orange is checking memory...
               </div>
             ) : null}
             <div ref={messagesEndRef} />
@@ -640,7 +659,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
               <textarea
                 id="orange-chat-message"
                 className="min-h-24 flex-1 resize-y rounded-md border border-[#d8ded7] bg-[#fbfaf5] px-3 py-3 text-sm leading-6 text-[#182019] outline-none transition placeholder:text-[#8b968f] focus:border-[#c5551c] focus:ring-2 focus:ring-[#c5551c]/18"
-                placeholder="Type a message for the Orange demo..."
+                placeholder="Describe a decision, fix, or question worth carrying forward..."
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
@@ -654,7 +673,7 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
                 className="inline-flex h-12 items-center justify-center rounded-md bg-[#c5551c] px-5 text-sm font-bold text-white shadow-[0_14px_36px_rgba(197,85,28,0.18)] transition hover:bg-[#9f4218] disabled:cursor-not-allowed disabled:opacity-55 sm:self-end"
                 disabled={!draft.trim() || isSending}
               >
-                {isSending ? "Sending..." : "Send"}
+                {isSending ? "Working..." : "Send message"}
               </button>
             </div>
             <p aria-live="polite" className="mt-3 min-h-5 text-sm text-[#9f4218]">
