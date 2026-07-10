@@ -81,9 +81,16 @@ ORANGE_PUBLIC_BACKEND_URL=https://orange-api-xxxx.onrender.com
 
 Notes:
 
-- `POSTGRES_DSN` is a server secret. Prefer the Supabase **direct** or
-  **session pooler** URL for this long-running process, keep SSL enabled, and
-  never expose it through a `NEXT_PUBLIC_` variable.
+- `POSTGRES_DSN` is a server secret. On **Render Free (IPv4-only outbound)**,
+  the Supabase **direct** host `db.<ref>.supabase.co` often resolves to
+  **IPv6 only** and will fail health checks. Use the **session pooler** DSN
+  (IPv4), for example:
+  ```text
+  postgresql://postgres.<project-ref>:<password>@aws-1-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+  ```
+  Session mode (`:5432` on the pooler) is preferred for Orange's long-lived
+  connection pool. Keep SSL enabled, and never expose the DSN through a
+  `NEXT_PUBLIC_` variable.
 - If you omit `ORANGE_PUBLIC_BACKEND_URL`, the app uses Render’s injected
   `RENDER_EXTERNAL_URL` for MCP OAuth `base_url`. Setting it explicitly is still
   recommended once you know the public hostname.
