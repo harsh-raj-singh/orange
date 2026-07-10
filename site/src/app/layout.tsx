@@ -15,9 +15,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Orange | Persistent memory for coding agents",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://site-sage-eta-18.vercel.app",
+  ),
+  title: "Orange | Memory for every AI you use",
   description:
-    "Orange preserves decisions, failed attempts, fixes, and evidence from one agent session so the next agent can continue with context.",
+    "Orange remembers the decisions, fixes, and context your team would otherwise lose—so every AI conversation can begin ahead.",
+  openGraph: {
+    title: "Orange | Your AI should remember what matters.",
+    description:
+      "One shared memory for the AI tools your team already uses.",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Orange — Your AI should remember what matters." }],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Orange | Your AI should remember what matters.",
+    description: "One shared memory for the AI tools your team already uses.",
+    images: ["/og.png"],
+  },
 };
 
 export default function RootLayout({

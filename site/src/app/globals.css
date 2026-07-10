@@ -118,6 +118,34 @@ html[data-scrolled] .site-nav {
   box-shadow: 0 0 14px rgba(255, 159, 95, 0.5);
 }
 
+.memory-note {
+  transform-origin: center;
+  transition:
+    transform 260ms ease,
+    box-shadow 260ms ease;
+}
+
+.memory-note:hover {
+  z-index: 20;
+  transform: translateY(-8px) rotate(0deg);
+  box-shadow: 0 34px 88px rgba(0, 0, 0, 0.34);
+}
+
+.memory-note-orange {
+  border-color: rgba(226, 99, 37, 0.28);
+  color: #a44417;
+}
+
+.memory-note-violet {
+  border-color: rgba(91, 72, 154, 0.24);
+  color: #544393;
+}
+
+.memory-note-green {
+  border-color: rgba(47, 111, 94, 0.26);
+  color: #2f6f5e;
+}
+
 .hero-word-mask > span,
 .line-mask > span {
   display: inline-block;
