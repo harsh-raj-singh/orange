@@ -3,6 +3,7 @@
 import dagre from "dagre";
 import {
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   MarkerType,
@@ -11,6 +12,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeProps,
@@ -72,8 +74,8 @@ type MemoryFlowNode = Node<MemoryNode & { isNew?: boolean }, "memoryCard">;
 type MemoryFlowEdge = Edge<{ strength?: number; related?: boolean }>;
 type GraphSyncState = "live" | "stale" | "preview";
 
-const NODE_WIDTH = 188;
-const NODE_HEIGHT = 118;
+const NODE_WIDTH = 228;
+const NODE_HEIGHT = 148;
 const STORAGE_PREFIX = "orange-memory-graph-positions:v2";
 const LIVE_POLL_INTERVAL_MS = 5_000;
 const RECOVERY_POLL_INTERVAL_MS = 15_000;
@@ -208,10 +210,16 @@ const visibleMemoryNodeIds = new Set(visibleMemoryNodes.map((node) => node.id));
 const visibleFallbackEdges = fallbackEdges.filter(
   (edge) => visibleMemoryNodeIds.has(edge.source) && visibleMemoryNodeIds.has(edge.target),
 );
+const initialScope: MemoryScopeValue = "global";
+const initialMemoryNodes = visibleMemoryNodes.filter((node) => nodeScope(node) === initialScope);
+const initialMemoryNodeIds = new Set(initialMemoryNodes.map((node) => node.id));
+const initialMemoryEdges = visibleFallbackEdges.filter(
+  (edge) => initialMemoryNodeIds.has(edge.source) && initialMemoryNodeIds.has(edge.target),
+);
 
 const scopeOptions: ReadonlyArray<{ value: MemoryScopeFilter; label: string }> = [
-  { value: "user", label: "Private memory" },
-  { value: "global", label: "Company memory" },
+  { value: "global", label: "Shared workspace" },
+  { value: "user", label: "My private notes" },
 ];
 
 const memoryKindStyles: Record<MemoryKind, { accent: string; bg: string; border: string; text: string }> = {
@@ -473,6 +481,14 @@ function writeStoredPositions(scope: MemoryScopeFilter, positions: Record<string
   }
 }
 
+function clearStoredPositions(scope: MemoryScopeFilter) {
+  try {
+    window.localStorage.removeItem(storageKey(scope));
+  } catch {
+    // The graph can still be re-laid out when browser storage is unavailable.
+  }
+}
+
 function positionsEqual(left: Record<string, StoredPosition>, right: Record<string, StoredPosition>) {
   const leftEntries = Object.entries(left);
   const rightEntries = Object.entries(right);
@@ -521,7 +537,7 @@ function layoutNodes(
 ): MemoryFlowNode[] {
   const graph = new dagre.graphlib.Graph();
   graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: "LR", nodesep: 70, ranksep: 110, marginx: 40, marginy: 40 });
+  graph.setGraph({ rankdir: "LR", nodesep: 82, ranksep: 150, marginx: 64, marginy: 64 });
 
   memoryNodesInput.forEach((node) => {
     graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
@@ -564,12 +580,12 @@ function layoutNodes(
     centroid.x /= movable.length;
     centroid.y /= movable.length;
 
-    const radius = Math.max(96, movable.length * 24);
+    const radius = Math.max(132, movable.length * 30);
     movable.forEach((id, index) => {
       const angle = (index / movable.length) * Math.PI * 2;
       positions.set(id, {
         x: centroid.x + Math.cos(angle) * radius,
-        y: centroid.y + Math.sin(angle) * radius * 0.72,
+        y: centroid.y + Math.sin(angle) * radius * 0.78,
       });
     });
   });
@@ -630,17 +646,18 @@ function layoutEdges(memoryEdgesInput: MemoryEdge[]): MemoryFlowEdge[] {
       source: edge.source,
       target: edge.target,
       label: edgeLabel(edge),
-      type: "smoothstep",
+      type: "default",
       data: { strength: edge.strength, related },
       markerEnd: related ? undefined : { type: MarkerType.ArrowClosed, color: "#9aa79d" },
       labelBgBorderRadius: 5,
       labelBgPadding: [6, 3],
-      labelBgStyle: { fill: related ? "#fbfaf5" : "#ffffff", fillOpacity: 0.86 },
+      labelStyle: { fill: "#617067", fontSize: 10, fontWeight: 700, letterSpacing: 0.4 },
+      labelBgStyle: { fill: "#f8faf7", fillOpacity: 0.94 },
       style: {
-        stroke: related ? "#b8aaa0" : "#9aa79d",
+        stroke: related ? "#c7926c" : "#7c9d8d",
         strokeDasharray: related ? "6 7" : undefined,
-        strokeOpacity: related ? 0.62 : 0.38 + (edge.strength ?? 0.7) * 0.22,
-        strokeWidth: related ? 1.5 : 1.2 + (edge.strength ?? 0.7),
+        strokeOpacity: related ? 0.7 : 0.5 + (edge.strength ?? 0.7) * 0.22,
+        strokeWidth: related ? 1.7 : 1.4 + (edge.strength ?? 0.7),
       },
     };
   });
@@ -650,29 +667,36 @@ function MemoryCardNode({ data, selected }: NodeProps<MemoryFlowNode>) {
   const memoryKind = nodeMemoryKind(data);
   const style = memoryKindStyles[memoryKind];
   const scope = nodeScope(data);
+  const capturedAt = formatDate(data.metadata?.createdAt);
 
   return (
     <button
       type="button"
-      className={`group w-[11.75rem] rounded-lg border px-3 py-3 text-left shadow-[0_16px_38px_rgba(36,53,45,0.12)] transition ${
-        selected ? "ring-2 ring-[#c5551c] ring-offset-2 ring-offset-[#fbfaf5]" : "hover:-translate-y-0.5"
+      className={`memory-card group relative flex h-[9.25rem] w-[14.25rem] flex-col overflow-hidden rounded-xl border text-left transition ${
+        selected ? "is-selected" : "hover:-translate-y-1"
       } ${data.isNew ? "animate-[node-pop_520ms_ease_forwards]" : ""}`}
-      style={{ background: style.bg, borderColor: style.border, color: style.text }}
+      style={{ borderColor: style.border, color: style.text, "--memory-accent": style.accent } as React.CSSProperties}
     >
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0" style={{ background: style.accent }} />
-      <span className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.14em]">
-          {memoryKind.replace("_", " ")}
+      <span className="absolute inset-x-0 top-0 h-1" style={{ background: style.accent }} aria-hidden="true" />
+      <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-2 !border-white" style={{ background: style.accent }} />
+      <span className="flex items-center justify-between gap-2 px-4 pt-4">
+        <span className="flex items-center gap-2 font-mono text-[0.63rem] font-bold uppercase tracking-[0.13em]">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: style.accent }} aria-hidden="true" />
+          {memoryKind.replaceAll("_", " ")}
         </span>
-        <span
-          className="h-2 w-2 rounded-full"
-          style={{ background: scope === "global" ? "#55479a" : "#c5551c" }}
-          aria-hidden="true"
-        />
+        <span className={`rounded-full px-2 py-0.5 font-mono text-[0.58rem] font-bold uppercase tracking-[0.1em] ${
+          scope === "global" ? "bg-[#eee9ff] text-[#55479a]" : "bg-[#fff0e5] text-[#a44719]"
+        }`}>
+          {scope === "global" ? "shared" : "private"}
+        </span>
       </span>
-      <span className="mt-1 block text-sm font-semibold leading-5 text-[#182019]">{truncateLabel(data.label)}</span>
-      <span className="mt-2 line-clamp-2 block text-xs leading-5 opacity-80">{data.summary}</span>
-      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0" style={{ background: style.accent }} />
+      <span className="mt-2 block px-4 text-[0.92rem] font-bold leading-5 text-[#172019]">{truncateLabel(data.label, 44)}</span>
+      <span className="mt-1.5 line-clamp-2 block px-4 text-[0.7rem] leading-[1.1rem] text-[#59665f]">{data.summary}</span>
+      <span className="mt-auto flex items-center justify-between border-t border-[#24352d]/8 px-4 py-2 font-mono text-[0.58rem] font-semibold uppercase tracking-[0.1em] text-[#77837c]">
+        <span>{data.outcome ?? data.metadata?.status ?? data.kind}</span>
+        <span>{capturedAt ?? "Orange memory"}</span>
+      </span>
+      <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-2 !border-white" style={{ background: style.accent }} />
     </button>
   );
 }
@@ -688,13 +712,14 @@ export default function MemoryGraph() {
 }
 
 function MemoryGraphInner() {
-  const [memoryNodeList, setMemoryNodeList] = useState(visibleMemoryNodes);
-  const [memoryEdgeList, setMemoryEdgeList] = useState<MemoryEdge[]>(visibleFallbackEdges);
-  const [selectedId, setSelectedId] = useState("cors-insight");
-  const [scope, setScope] = useState<MemoryScopeFilter>("user");
-  const [nodePositions, setNodePositions] = useState<Record<string, StoredPosition>>(() => readStoredPositions("user"));
+  const { fitView } = useReactFlow<MemoryFlowNode, MemoryFlowEdge>();
+  const [memoryNodeList, setMemoryNodeList] = useState(initialMemoryNodes);
+  const [memoryEdgeList, setMemoryEdgeList] = useState<MemoryEdge[]>(initialMemoryEdges);
+  const [selectedId, setSelectedId] = useState(initialMemoryNodes[0]?.id ?? "");
+  const [scope, setScope] = useState<MemoryScopeFilter>(initialScope);
+  const [nodePositions, setNodePositions] = useState<Record<string, StoredPosition>>(() => readStoredPositions(initialScope));
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<MemoryFlowNode>(
-    layoutNodes(visibleMemoryNodes, visibleFallbackEdges, readStoredPositions("user"), new Set()),
+    layoutNodes(initialMemoryNodes, initialMemoryEdges, readStoredPositions(initialScope), new Set()),
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [graphSyncState, setGraphSyncState] = useState<GraphSyncState>("preview");
@@ -734,8 +759,8 @@ function MemoryGraphInner() {
   const currentGraphContext = graphContextKey(scope, userEmail, company);
   const currentGraphQuery = graphSearchParams(scope, userEmail, company).toString();
   const graphRef = useRef<HTMLDivElement>(null);
-  const memoryNodeListRef = useRef(visibleMemoryNodes);
-  const memoryEdgeListRef = useRef<MemoryEdge[]>(visibleFallbackEdges);
+  const memoryNodeListRef = useRef(initialMemoryNodes);
+  const memoryEdgeListRef = useRef<MemoryEdge[]>(initialMemoryEdges);
   const flowNodesRef = useRef(flowNodes);
   const activeGraphContextRef = useRef(currentGraphContext);
   const renderedGraphContextRef = useRef(currentGraphContext);
@@ -755,7 +780,7 @@ function MemoryGraphInner() {
   const nextFallbackPollAtRef = useRef(0);
   const isVersionCheckInFlightRef = useRef(false);
   const lastHydratedSignatureRef = useRef(
-    graphHydrationSignature(visibleMemoryNodes, visibleFallbackEdges, "user"),
+    graphHydrationSignature(initialMemoryNodes, initialMemoryEdges, initialScope),
   );
 
   const selectedNode = useMemo(
@@ -779,6 +804,19 @@ function MemoryGraphInner() {
     },
     [nodePositions, scope],
   );
+
+  const fitGraph = useCallback(() => {
+    void fitView({ padding: 0.22, duration: 650, maxZoom: 1.12 });
+  }, [fitView]);
+
+  const resetGraphLayout = useCallback(() => {
+    clearStoredPositions(scope);
+    setNodePositions({});
+    const nextNodes = layoutNodes(memoryNodeListRef.current, memoryEdgeListRef.current, {}, new Set());
+    flowNodesRef.current = nextNodes;
+    setFlowNodes(nextNodes);
+    window.setTimeout(fitGraph, 40);
+  }, [fitGraph, scope, setFlowNodes]);
 
   const hydrateFlowNodes = useCallback(
     (
@@ -813,8 +851,11 @@ function MemoryGraphInner() {
       renderedGraphContextRef.current = nextGraphContext;
       setNodePositions(storedPositions);
       setFlowNodes(layoutNodes(nextNodes, nextEdges, storedPositions, freshIds));
+      if (freshIds.size > 0 || Object.keys(currentPositions).length === 0) {
+        window.setTimeout(fitGraph, 60);
+      }
     },
-    [currentGraphContext, setFlowNodes],
+    [currentGraphContext, fitGraph, setFlowNodes],
   );
 
   useEffect(() => {
@@ -1254,19 +1295,24 @@ function MemoryGraphInner() {
   }
 
   return (
-    <div className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] ${introVisible ? "graph-in-view" : ""}`}>
-      <div className="flex flex-col gap-3 rounded-lg border border-[#24352d]/10 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between lg:col-span-2">
-        <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#5f746b]">
-          Show memories from
-        </p>
-        <div className="grid grid-cols-2 rounded-md border border-[#d8ded7] bg-[#f7f9f6] p-1">
+    <div className={`grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] ${introVisible ? "graph-in-view" : ""}`}>
+      <div className="flex flex-col gap-4 rounded-xl border border-[#24352d]/10 bg-white/90 p-4 shadow-[0_14px_40px_rgba(36,53,45,0.07)] backdrop-blur sm:flex-row sm:items-center sm:justify-between lg:col-span-2">
+        <div>
+          <p className="font-mono text-xs font-bold uppercase tracking-[0.18em] text-[#2f6f5e]">
+            Orange memory workspace
+          </p>
+          <p className="mt-1 text-sm text-[#69756e]">
+            Shared notes are visible to everyone using the same workspace name.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 rounded-lg border border-[#d8ded7] bg-[#f2f5f1] p-1">
           {scopeOptions.map((option) => (
             <button
               key={option.value}
               type="button"
-              className={`h-9 rounded px-3 text-xs font-bold transition ${
+              className={`h-10 rounded-md px-3 text-xs font-bold transition ${
                 scope === option.value
-                  ? "bg-white text-[#24352d] shadow-sm"
+                  ? "bg-[#24352d] text-white shadow-[0_6px_18px_rgba(36,53,45,0.18)]"
                   : "text-[#5f746b] hover:text-[#24352d]"
               }`}
               onClick={() => {
@@ -1282,15 +1328,16 @@ function MemoryGraphInner() {
 
       <div
         ref={graphRef}
-        className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#24352d]/10 bg-[#fbfaf5] shadow-[0_24px_70px_rgba(36,53,45,0.12)] sm:min-h-[500px]"
+        className="memory-graph-stage relative min-h-[500px] overflow-hidden rounded-2xl border border-[#24352d]/10 shadow-[0_30px_90px_rgba(36,53,45,0.14)] sm:min-h-[620px]"
       >
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
           nodeTypes={nodeTypes}
           fitView
+          fitViewOptions={{ padding: 0.22, maxZoom: 1.12 }}
           minZoom={0.25}
-          maxZoom={1.8}
+          maxZoom={1.65}
           onNodesChange={onNodesChange}
           onNodeClick={(_event, node) => {
             void selectNode(node.data);
@@ -1304,11 +1351,11 @@ function MemoryGraphInner() {
           }}
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="#d8ded7" gap={24} />
-          <Controls className="!border-[#24352d]/10 !bg-white/90 !shadow-sm" />
+          <Background variant={BackgroundVariant.Dots} color="#a8b8ae" gap={22} size={1.25} />
+          <Controls className="!m-4 !overflow-hidden !rounded-lg !border-[#24352d]/10 !bg-white/95 !shadow-lg" />
           <MiniMap
-            className="!right-4 !bottom-4 !h-28 !w-40 !rounded-md !border !border-[#24352d]/10 !bg-white/90 !shadow-sm"
-            maskColor="rgba(36, 53, 45, 0.08)"
+            className="!right-4 !bottom-4 !hidden !h-28 !w-40 !rounded-lg !border !border-[#24352d]/10 !bg-white/90 !shadow-lg sm:!block"
+            maskColor="rgba(232, 238, 232, 0.64)"
             nodeColor={(node) => memoryKindStyles[nodeMemoryKind((node as MemoryFlowNode).data)].accent}
             nodeStrokeWidth={2}
             pannable
@@ -1324,16 +1371,15 @@ function MemoryGraphInner() {
           </div>
         ) : null}
 
-        <div className="pointer-events-none absolute left-5 top-5 rounded-md border border-[#24352d]/10 bg-white/88 px-3 py-2 shadow-sm backdrop-blur">
-          <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#c5551c]">
-            Graph status
-          </p>
-          <p className="mt-1 text-xs text-[#536057]">
-            {memoryNodeList.length} {memoryNodeList.length === 1 ? "memory" : "memories"} {isRefreshing ? "updating" : "connected"}
-          </p>
+        <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-2 rounded-xl border border-white/80 bg-white/90 p-2 shadow-[0_12px_34px_rgba(36,53,45,0.12)] backdrop-blur-md">
+          <div className="pointer-events-none px-2">
+            <p className="flex items-center gap-2 text-xs font-bold text-[#24352d]">
+              <span className={`h-2 w-2 rounded-full ${graphSyncState === "live" ? "bg-[#28a96b]" : graphSyncState === "stale" ? "bg-[#d7922b]" : "bg-[#c5551c]"}`} />
+              {memoryNodeList.length} {memoryNodeList.length === 1 ? "memory" : "memories"}
+            </p>
           <p
             aria-live="polite"
-            className={`mt-1 font-mono text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${
+              className={`mt-0.5 font-mono text-[0.58rem] font-semibold uppercase tracking-[0.12em] ${
               graphSyncState === "live"
                 ? "text-[#2f6f5e]"
                 : graphSyncState === "stale"
@@ -1342,15 +1388,23 @@ function MemoryGraphInner() {
             }`}
           >
             {graphSyncState === "live"
-              ? "live · watching for changes"
+                ? isRefreshing ? "syncing latest notes" : "live · auto-syncing"
               : graphSyncState === "stale"
-                ? "reconnecting · showing last update"
-                : "sample graph · sign in for yours"}
+                  ? "reconnecting · last update shown"
+                  : "preview · sign in for live notes"}
           </p>
+          </div>
+          <span className="h-7 w-px bg-[#24352d]/10" aria-hidden="true" />
+          <button type="button" onClick={fitGraph} className="h-8 rounded-md px-2.5 text-xs font-bold text-[#536057] transition hover:bg-[#eef3ed] hover:text-[#24352d]">
+            Fit view
+          </button>
+          <button type="button" onClick={resetGraphLayout} className="h-8 rounded-md px-2.5 text-xs font-bold text-[#536057] transition hover:bg-[#eef3ed] hover:text-[#24352d]">
+            Re-layout
+          </button>
         </div>
       </div>
 
-      <aside className="rounded-lg border border-[#24352d]/10 bg-white p-5 shadow-[0_18px_46px_rgba(36,53,45,0.10)]">
+      <aside className="rounded-2xl border border-[#24352d]/10 bg-white p-6 shadow-[0_18px_46px_rgba(36,53,45,0.10)] lg:max-h-[620px] lg:overflow-y-auto">
         <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-[#2f6f5e]">
           Memory details
         </p>

@@ -39,6 +39,7 @@ type ChatResponse = {
 type CompletionResponse = {
   persisted?: boolean;
   source?: "backend";
+  job_status?: string;
 };
 
 const emptyProfile: Profile = {
@@ -148,7 +149,8 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
   });
   const [contributeToGlobal, setContributeToGlobal] = useState(true);
   const [isProfileSubmitted, setIsProfileSubmitted] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"backend" | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"queued" | "backend" | null>(null);
+  const [profileAttempted, setProfileAttempted] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sessionId, setSessionId] = useState<string>(() => createId("orange-session"));
@@ -229,7 +231,8 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
       });
 
       if (!response.ok) {
-        throw new Error("Completion request failed.");
+        const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(errorBody?.error ?? "Orange could not save this session.");
       }
 
       const completion = (await response.json().catch(() => ({}))) as CompletionResponse;
@@ -258,13 +261,17 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
 
   function updateProfile(field: keyof Profile, value: string) {
     setProfile((current) => ({ ...current, [field]: value }));
+    if (field === "company" && value.trim()) {
+      setError(null);
+    }
   }
 
   function submitProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setProfileAttempted(true);
 
     if (!isProfileReady) {
-      setError("Add a company memory space before starting the session.");
+      setError("Enter the shared workspace name to start the session.");
       return;
     }
 
@@ -428,9 +435,19 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
 
     try {
       const completion = await completeConversation("user_done");
-      setSaveStatus(completion?.persisted === false ? null : "backend");
-    } catch {
-      setError("Orange could not save this session yet. Your conversation is still available here.");
+      setSaveStatus(
+        completion?.persisted === false
+          ? null
+          : completion?.job_status && completion.job_status !== "succeeded"
+            ? "queued"
+            : "backend",
+      );
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? `${saveError.message} Your conversation is still available here.`
+          : "Orange could not save this session yet. Your conversation is still available here.",
+      );
     } finally {
       setIsCompleting(false);
     }
@@ -480,16 +497,28 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
           </div>
           {profileFields.map((field) => (
             <label htmlFor={`orange-${field.id}`} key={field.id}>
-              <span className="text-sm font-semibold text-[#24352d]">{field.label}</span>
+              <span className="flex items-center justify-between gap-3 text-sm font-semibold text-[#24352d]">
+                {field.label}
+                <span className="font-mono text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-[#8f3b14]">
+                  Required
+                </span>
+              </span>
               <input
                 id={`orange-${field.id}`}
                 type={field.type ?? "text"}
-                className="mt-2 h-11 w-full rounded-md border border-[#d8ded7] bg-[#fbfaf5] px-3 text-sm text-[#182019] outline-none transition placeholder:text-[#8b968f] focus:border-[#c5551c] focus:ring-2 focus:ring-[#c5551c]/18"
+                aria-describedby="orange-workspace-help"
+                aria-invalid={profileAttempted && !profile.company.trim()}
+                className={`mt-2 h-11 w-full rounded-md border bg-[#fbfaf5] px-3 text-sm text-[#182019] outline-none transition placeholder:text-[#8b968f] focus:border-[#c5551c] focus:ring-2 focus:ring-[#c5551c]/18 ${
+                  profileAttempted && !profile.company.trim() ? "border-[#c5551c]" : "border-[#d8ded7]"
+                }`}
                 placeholder={field.placeholder}
                 value={profile[field.id]}
                 onChange={(event) => updateProfile(field.id, event.target.value)}
                 required
               />
+              <span id="orange-workspace-help" className="mt-2 block text-xs leading-5 text-[#66736b]">
+                Everyone who joins this same workspace sees its shared graph notes.
+              </span>
             </label>
           ))}
 
@@ -517,7 +546,6 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
             <button
               type="submit"
               className="inline-flex h-11 items-center justify-center rounded-md bg-[#24352d] px-5 text-sm font-bold text-white shadow-[0_14px_36px_rgba(36,53,45,0.16)] transition hover:bg-[#c5551c] disabled:cursor-not-allowed disabled:opacity-55"
-              disabled={!isProfileReady}
             >
               Start memory session
             </button>
@@ -551,13 +579,17 @@ export default function TestChat({ authenticatedEmail }: { authenticatedEmail: s
             className={`text-xs ${
               saveStatus === "backend"
                   ? "text-[#2f6f5e]"
+                  : saveStatus === "queued"
+                    ? "text-[#9a5c16]"
                   : hasUnsavedMessages
                     ? "text-[#5f746b]"
                     : "text-transparent"
             }`}
           >
-            {saveStatus === "backend"
-                ? "Saved. The graph will refresh automatically."
+            {saveStatus === "queued"
+                ? "Saved. Orange is extracting graph notes now."
+                : saveStatus === "backend"
+                  ? "Saved. The graph will refresh automatically."
                 : hasUnsavedMessages
                   ? "Finish the session to extract durable memory."
                   : "."}
