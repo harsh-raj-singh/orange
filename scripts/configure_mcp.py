@@ -98,7 +98,20 @@ def _list_grok_servers() -> list[dict[str, Any]]:
             "(`grok mcp list --json` did not return a JSON array).\n"
             "Refusing to add/overwrite without a successful inventory."
         )
-    return [item for item in payload if isinstance(item, dict)]
+    # Only a real empty array means no servers. Non-object elements (null,
+    # strings, etc.) make the inventory untrustworthy — do not filter them
+    # into [] and silently proceed.
+    invalid_indexes = [
+        index for index, item in enumerate(payload) if not isinstance(item, dict)
+    ]
+    if invalid_indexes:
+        raise SystemExit(
+            "Could not inspect existing Grok MCP servers "
+            "(`grok mcp list --json` returned a JSON array with non-object "
+            f"entries at index(es) {invalid_indexes}).\n"
+            "Refusing to add/overwrite without a successful inventory."
+        )
+    return list(payload)
 
 
 def _find_grok_server(name: str) -> dict[str, Any] | None:

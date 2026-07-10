@@ -124,6 +124,44 @@ def test_list_grok_servers_empty_array_means_no_servers(monkeypatch) -> None:
     assert configure_mcp._list_grok_servers() == []
 
 
+def test_list_grok_servers_rejects_null_array_elements(monkeypatch) -> None:
+    monkeypatch.setattr(configure_mcp, "_grok_binary", lambda: "grok")
+    monkeypatch.setattr(
+        configure_mcp,
+        "_run_capture",
+        lambda command: type(
+            "R",
+            (),
+            {"returncode": 0, "stdout": "[null]", "stderr": ""},
+        )(),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        configure_mcp._list_grok_servers()
+
+    assert "non-object" in str(exc.value)
+    assert "0" in str(exc.value)
+
+
+def test_list_grok_servers_rejects_non_object_array_elements(monkeypatch) -> None:
+    monkeypatch.setattr(configure_mcp, "_grok_binary", lambda: "grok")
+    monkeypatch.setattr(
+        configure_mcp,
+        "_run_capture",
+        lambda command: type(
+            "R",
+            (),
+            {"returncode": 0, "stdout": '["invalid", {"name": "x"}]', "stderr": ""},
+        )(),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        configure_mcp._list_grok_servers()
+
+    assert "non-object" in str(exc.value)
+    assert "[0]" in str(exc.value) or "0" in str(exc.value)
+
+
 def test_remote_refuses_when_list_inspection_fails(monkeypatch) -> None:
     """Overwrite guard must not treat list failure as 'no servers'."""
 
