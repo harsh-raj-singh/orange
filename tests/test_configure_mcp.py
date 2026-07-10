@@ -72,6 +72,85 @@ def test_remote_force_overwrites_existing(monkeypatch) -> None:
     assert "orange-remote" in captured[0]
 
 
+def test_list_grok_servers_fails_closed_on_command_error(monkeypatch) -> None:
+    monkeypatch.setattr(configure_mcp, "_grok_binary", lambda: "grok")
+    monkeypatch.setattr(
+        configure_mcp,
+        "_run_capture",
+        lambda command: type(
+            "R",
+            (),
+            {"returncode": 1, "stdout": "", "stderr": "boom"},
+        )(),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        configure_mcp._list_grok_servers()
+
+    assert "Could not inspect existing Grok MCP servers" in str(exc.value)
+    assert "boom" in str(exc.value)
+
+
+def test_list_grok_servers_fails_closed_on_malformed_json(monkeypatch) -> None:
+    monkeypatch.setattr(configure_mcp, "_grok_binary", lambda: "grok")
+    monkeypatch.setattr(
+        configure_mcp,
+        "_run_capture",
+        lambda command: type(
+            "R",
+            (),
+            {"returncode": 0, "stdout": "not-json", "stderr": ""},
+        )(),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        configure_mcp._list_grok_servers()
+
+    assert "invalid JSON" in str(exc.value)
+
+
+def test_list_grok_servers_empty_array_means_no_servers(monkeypatch) -> None:
+    monkeypatch.setattr(configure_mcp, "_grok_binary", lambda: "grok")
+    monkeypatch.setattr(
+        configure_mcp,
+        "_run_capture",
+        lambda command: type(
+            "R",
+            (),
+            {"returncode": 0, "stdout": "[]", "stderr": ""},
+        )(),
+    )
+
+    assert configure_mcp._list_grok_servers() == []
+
+
+def test_remote_refuses_when_list_inspection_fails(monkeypatch) -> None:
+    """Overwrite guard must not treat list failure as 'no servers'."""
+
+    monkeypatch.setattr(configure_mcp, "_grok_binary", lambda: "grok")
+    monkeypatch.setattr(
+        configure_mcp,
+        "_run_capture",
+        lambda command: type(
+            "R",
+            (),
+            {"returncode": 2, "stdout": "", "stderr": "list unavailable"},
+        )(),
+    )
+    ran: list[list[str]] = []
+    monkeypatch.setattr(
+        configure_mcp,
+        "_run",
+        lambda command, check=True: ran.append(list(command)),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        configure_mcp.main(["grok", "remote"])
+
+    assert "Could not inspect existing Grok MCP servers" in str(exc.value)
+    assert ran == []
+
+
 def test_local_defaults_to_orange(monkeypatch) -> None:
     captured: list[list[str]] = []
     monkeypatch.setattr(configure_mcp, "_grok_binary", lambda: "grok")

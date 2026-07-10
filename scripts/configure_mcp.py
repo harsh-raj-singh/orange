@@ -60,18 +60,45 @@ def _grok_binary() -> str:
 
 
 def _list_grok_servers() -> list[dict[str, Any]]:
-    """Return configured Grok MCP servers, or [] if list is unavailable."""
+    """Return configured Grok MCP servers.
+
+    Fails closed when inspection fails. An empty list means the command
+    succeeded and no servers are configured — never treat a list/parse error
+    as "no servers," which would allow overwriting without --force.
+    """
 
     result = _run_capture([_grok_binary(), "mcp", "list", "--json"])
-    if result.returncode != 0 or not (result.stdout or "").strip():
-        return []
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    if result.returncode != 0:
+        detail = stderr or stdout or f"exit code {result.returncode}"
+        raise SystemExit(
+            "Could not inspect existing Grok MCP servers "
+            f"(`grok mcp list --json` failed: {detail}).\n"
+            "Refusing to add or overwrite without a successful inventory "
+            "(including with --force). Fix the Grok CLI error and retry."
+        )
+    if not stdout:
+        raise SystemExit(
+            "Could not inspect existing Grok MCP servers "
+            "(`grok mcp list --json` returned empty output).\n"
+            "Refusing to add/overwrite without a successful inventory."
+        )
     try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    return []
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            "Could not inspect existing Grok MCP servers "
+            f"(`grok mcp list --json` produced invalid JSON: {exc}).\n"
+            "Refusing to add/overwrite without a successful inventory."
+        ) from exc
+    if not isinstance(payload, list):
+        raise SystemExit(
+            "Could not inspect existing Grok MCP servers "
+            "(`grok mcp list --json` did not return a JSON array).\n"
+            "Refusing to add/overwrite without a successful inventory."
+        )
+    return [item for item in payload if isinstance(item, dict)]
 
 
 def _find_grok_server(name: str) -> dict[str, Any] | None:
