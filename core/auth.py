@@ -26,6 +26,8 @@ def _public_backend_url() -> str:
     configured = (
         os.getenv("ORANGE_PUBLIC_BACKEND_URL")
         or os.getenv("ORANGE_BACKEND_URL")
+        # Render injects the public HTTPS origin for the web service.
+        or os.getenv("RENDER_EXTERNAL_URL")
         or os.getenv("RAILWAY_PUBLIC_DOMAIN")
         or ""
     ).strip()

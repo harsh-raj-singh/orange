@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 
-const ORANGE_MCP_URL = "https://orange-api-production.up.railway.app/mcp";
+const ORANGE_MCP_URL = (
+  process.env.NEXT_PUBLIC_ORANGE_MCP_URL ||
+  (process.env.NEXT_PUBLIC_ORANGE_BACKEND_URL
+    ? `${process.env.NEXT_PUBLIC_ORANGE_BACKEND_URL.replace(/\/$/, "")}/mcp`
+    : "https://orange-api-xxxx.onrender.com/mcp")
+).replace(/\/$/, "");
 const GROK_ADD_COMMAND = `grok mcp add --scope user --transport http orange ${ORANGE_MCP_URL}`;
 
 function CopyButton({ value }: { value: string }) {

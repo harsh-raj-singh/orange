@@ -1,0 +1,55 @@
+# Orange backend on Render Free (replaces Railway for the FastAPI + MCP service).
+# Supabase remains the durable store. Vercel remains the Next.js frontend.
+#
+# Deploy: https://dashboard.render.com/select-repo?type=blueprint
+# Repo: https://github.com/harsh-raj-singh/orange
+# Branch: set to codex/memory-graph-cache until this lands on main.
+#
+# Secrets with sync:false are prompted once in the Render dashboard.
+
+services:
+  - type: web
+    name: orange-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile.railway
+    dockerContext: .
+    # Start command comes from Dockerfile.railway CMD (honors $PORT).
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    # Free tier spins down after ~15m idle; first request may take 30–60s.
+    envVars:
+      - key: ORANGE_MEMORY_WRITE_MODE
+        value: queued
+      - key: SUPABASE_JWT_ALGORITHM
+        value: ES256
+      - key: OPENAI_MODEL
+        value: gpt-5.4-nano
+      - key: ENABLE_SLACK_BOT
+        value: "false"
+      # Set after first deploy to https://<service>.onrender.com (or leave blank;
+      # the app falls back to RENDER_EXTERNAL_URL which Render injects).
+      - key: ORANGE_PUBLIC_BACKEND_URL
+        sync: false
+      - key: POSTGRES_DSN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+    buildFilter:
+      paths:
+        - core/**
+        - supabase/**
+        - requirements-railway.txt
+        - Dockerfile.railway
+        - render.yaml
+      ignoredPaths:
+        - site/**
+        - tests/**
+        - docs/**
+        - "*.md"
+        - scripts/**

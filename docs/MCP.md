@@ -3,8 +3,10 @@
 Orange exposes a Streamable HTTP MCP resource at:
 
 ```text
-https://orange-api-production.up.railway.app/mcp
+https://orange-api-xxxx.onrender.com/mcp
 ```
+
+(Replace with your Render service hostname after deploy.)
 
 Remote access uses Supabase OAuth Server discovery, dynamic client
 registration, PKCE, browser login, and consent. Users do not create or paste an
@@ -15,7 +17,7 @@ Orange token.
 ```bash
 grok mcp remove orange
 grok mcp add --scope user --transport http orange \
-  https://orange-api-production.up.railway.app/mcp
+  https://orange-api-xxxx.onrender.com/mcp
 ```
 
 Then open Grok, run `/mcps`, select Orange, and press `i`. Complete the browser
@@ -70,8 +72,8 @@ adds resource-indicator support.
 ## Discovery checks
 
 ```bash
-curl https://orange-api-production.up.railway.app/.well-known/oauth-protected-resource/mcp
-curl https://orange-api-production.up.railway.app/.well-known/oauth-authorization-server
+curl https://orange-api-xxxx.onrender.com/.well-known/oauth-protected-resource/mcp
+curl https://orange-api-xxxx.onrender.com/.well-known/oauth-authorization-server
 ```
 
 An unauthenticated MCP request should return `401` with a `WWW-Authenticate`

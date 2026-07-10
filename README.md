@@ -4,7 +4,8 @@ Orange is a memory fabric for developer and agentic workflows. It captures compl
 
 Live demo: [https://site-sage-eta-18.vercel.app](https://site-sage-eta-18.vercel.app)
 
-Backend API: [https://orange-api-production.up.railway.app](https://orange-api-production.up.railway.app)
+Backend API: Render Free web service (`orange-api` — see `DEPLOY.md` / `render.yaml`).
+Legacy Railway URL is retired after the trial expired.
 
 ## Core Loop
 
@@ -130,6 +131,8 @@ It includes:
 ├── supabase/
 ├── tests/
 ├── DEPLOY.md
+├── render.yaml
+├── Dockerfile.railway
 ├── railway.toml
 └── requirements.txt
 ```
@@ -171,7 +174,7 @@ For local frontend-to-backend calls, set:
 ORANGE_BACKEND_URL=http://localhost:8001
 ```
 
-For Vercel production, `ORANGE_BACKEND_URL` should point at the Railway backend.
+For Vercel production, `ORANGE_BACKEND_URL` should point at the Render backend.
 
 ## Running Locally
 
@@ -252,14 +255,16 @@ https://site-sage-eta-18.vercel.app
 Backend:
 
 ```text
-https://orange-api-production.up.railway.app
+https://orange-api-xxxx.onrender.com
 ```
 
-The Vercel site calls Railway through `ORANGE_BACKEND_URL` and forwards the
+(Replace with your Render service hostname after the first deploy.)
+
+The Vercel site calls Render through `ORANGE_BACKEND_URL` and forwards the
 signed-in user's Supabase access token. Signed-out visitors may see preview data;
 real user memory is never selected by an unverified browser email.
 
-See `DEPLOY.md` for Supabase/Railway/Vercel setup and the Grok OAuth smoke test.
+See `DEPLOY.md` for Supabase/Render/Vercel setup and the Grok OAuth smoke test.
 
 ## Supabase Schema
 

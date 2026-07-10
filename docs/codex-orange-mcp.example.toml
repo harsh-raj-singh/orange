@@ -1,5 +1,5 @@
 [mcp_servers.orange_remote]
-url = "https://orange-api-production.up.railway.app/mcp/"
+url = "https://orange-api-xxxx.onrender.com/mcp/"
 bearer_token_env_var = "ORANGE_MCP_TOKEN"
 startup_timeout_sec = 20
 tool_timeout_sec = 180

@@ -11,7 +11,7 @@ import sys
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_REMOTE_URL = "https://orange-api-production.up.railway.app/mcp"
+DEFAULT_REMOTE_URL = "https://orange-api-xxxx.onrender.com/mcp"
 
 
 def _run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
