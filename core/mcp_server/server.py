@@ -19,6 +19,7 @@ from core.mcp_server.models import (
 )
 try:
     from fastmcp import FastMCP
+    from mcp.types import ToolAnnotations
 except Exception as exc:  # noqa: BLE001
     raise RuntimeError("fastmcp is required: pip install fastmcp") from exc
 
@@ -27,6 +28,20 @@ _AUTH_PROVIDER = get_supabase_auth_provider()
 _APP = FastMCP("orange", auth=_AUTH_PROVIDER)
 _LLM_CLIENT: Any | None = None
 _POSTGRES_STORE: Any | None = None
+
+# MCP tool annotation hints for clients.
+# Recall/inspection tools are pure reads; checkpoint/completion tools write
+# durable memory but never delete or overwrite unrelated user data.
+READ_ONLY_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+)
+NON_DESTRUCTIVE_WRITE_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=False,
+)
 
 ORANGE_INSTRUCTIONS = """## Orange Memory Protocol
 
@@ -285,7 +300,7 @@ def _status_warnings(
     return warnings
 
 
-@_APP.tool()
+@_APP.tool(annotations=READ_ONLY_ANNOTATIONS)
 async def orange_status() -> dict:
     """Return structured Orange MCP health, auth, schema, and tool information."""
 
@@ -304,7 +319,7 @@ async def orange_status() -> dict:
     }
 
 
-@_APP.tool(description=RECALL_MEMORY_DESCRIPTION)
+@_APP.tool(description=RECALL_MEMORY_DESCRIPTION, annotations=READ_ONLY_ANNOTATIONS)
 async def recall_memory(
     query: str,
     user_id: str = "",
@@ -333,7 +348,10 @@ async def recall_memory(
     return asdict(resp)
 
 
-@_APP.tool(description=COMPLETE_CONVERSATION_DESCRIPTION)
+@_APP.tool(
+    description=COMPLETE_CONVERSATION_DESCRIPTION,
+    annotations=NON_DESTRUCTIVE_WRITE_ANNOTATIONS,
+)
 async def complete_conversation(
     transcript: str = "",
     source: str = "mcp",
@@ -411,7 +429,10 @@ async def complete_conversation(
     return payload
 
 
-@_APP.tool(description=CHECKPOINT_CONTEXT_DESCRIPTION)
+@_APP.tool(
+    description=CHECKPOINT_CONTEXT_DESCRIPTION,
+    annotations=NON_DESTRUCTIVE_WRITE_ANNOTATIONS,
+)
 async def checkpoint_context(
     note: str,
     user_email: str | None = None,
@@ -447,7 +468,7 @@ def orange_instructions() -> str:
     return ORANGE_INSTRUCTIONS
 
 
-@_APP.tool()
+@_APP.tool(annotations=NON_DESTRUCTIVE_WRITE_ANNOTATIONS)
 async def store_session(
     transcript: str,
     source: str,
@@ -504,7 +525,7 @@ async def store_session(
     return asdict(resp)
 
 
-@_APP.tool()
+@_APP.tool(annotations=READ_ONLY_ANNOTATIONS)
 async def inspect_graph(
     user_id: str = "",
     user_email: str | None = None,
@@ -528,7 +549,7 @@ async def inspect_graph(
     )
 
 
-@_APP.tool()
+@_APP.tool(annotations=READ_ONLY_ANNOTATIONS)
 async def get_node(
     node_id: str,
     user_id: str = "",
@@ -550,7 +571,7 @@ async def get_node(
     )
 
 
-@_APP.tool()
+@_APP.tool(annotations=READ_ONLY_ANNOTATIONS)
 async def get_session_graph(
     session_id: str,
     user_id: str = "",
@@ -572,7 +593,7 @@ async def get_session_graph(
     )
 
 
-@_APP.tool()
+@_APP.tool(annotations=READ_ONLY_ANNOTATIONS)
 async def list_sessions(
     user_id: str = "",
     user_email: str | None = None,
@@ -596,7 +617,7 @@ async def list_sessions(
     )
 
 
-@_APP.tool()
+@_APP.tool(annotations=READ_ONLY_ANNOTATIONS)
 async def get_job_status(job_id: str, user_email: str | None = None) -> dict:
     """Return durable extraction progress/result for a completed-session job."""
 
@@ -629,7 +650,7 @@ async def get_job_status(job_id: str, user_email: str | None = None) -> dict:
     }
 
 
-@_APP.tool()
+@_APP.tool(annotations=READ_ONLY_ANNOTATIONS)
 async def memory_peek(
     limit: int = 10,
     scope: str = "user",

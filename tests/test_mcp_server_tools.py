@@ -125,3 +125,41 @@ def test_orange_instructions_resource_content() -> None:
     assert "Call recall_memory with a short query" in content
     assert "Call checkpoint_context whenever:" in content
     assert "Do NOT call complete_conversation mid-session." in content
+
+
+def test_mcp_tool_annotations_mark_reads_and_non_destructive_writes() -> None:
+    """Recall/inspection tools are read-only; checkpoint/completion write safely."""
+
+    tools = {
+        tool.name: tool.annotations
+        for tool in asyncio.run(server._APP.list_tools())
+    }
+
+    read_only = {
+        "orange_status",
+        "recall_memory",
+        "inspect_graph",
+        "get_node",
+        "get_session_graph",
+        "list_sessions",
+        "get_job_status",
+        "memory_peek",
+    }
+    write_tools = {
+        "checkpoint_context",
+        "complete_conversation",
+        "store_session",
+    }
+
+    for name in read_only:
+        annotations = tools[name]
+        assert annotations is not None, name
+        assert annotations.readOnlyHint is True, name
+        assert annotations.destructiveHint is False, name
+        assert annotations.idempotentHint is True, name
+
+    for name in write_tools:
+        annotations = tools[name]
+        assert annotations is not None, name
+        assert annotations.readOnlyHint is False, name
+        assert annotations.destructiveHint is False, name

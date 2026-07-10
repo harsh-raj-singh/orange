@@ -1,8 +1,15 @@
 # Orange with Grok CLI
 
-Grok CLI can connect to Orange through the deployed Streamable HTTP MCP or a
-local stdio process. Use the deployed server for normal testing so Grok and the
-Orange website read and write the same Supabase Postgres memory store.
+Grok CLI connects to the same Orange Streamable HTTP MCP endpoint as Claude,
+ChatGPT, and other clients:
+
+```text
+https://orange-api-x38s.onrender.com/mcp
+```
+
+Use the deployed server for normal testing so Grok and the Orange website read
+and write the same Supabase Postgres memory store. There is no Grok-only MCP
+backend.
 
 ## Recommended: deployed Orange with browser login
 
@@ -10,50 +17,43 @@ Add the hosted MCP URL once. No bearer token, API key, header, or environment
 variable is required:
 
 ```bash
-grok mcp add --scope user --transport http orange https://orange-api-x38s.onrender.com/mcp
+# Keep working local stdio as `orange` until remote login is verified:
+grok mcp add --scope user --transport http orange-remote \
+  https://orange-api-x38s.onrender.com/mcp
 ```
 
 Then authenticate from Grok:
 
 1. Launch `grok`.
 2. Enter `/mcps`.
-3. Select the `orange` server and press `i`.
+3. Select the `orange-remote` server and press `i`.
 4. Complete the Orange email sign-in and consent flow in the browser window
    Grok opens.
-5. Return to Grok. The authenticated MCP connection is now available without
-   copying a secret into your shell or configuration.
+5. Return to Grok. Call `orange_status`, then a small `complete_conversation`.
 
-The repository helper runs the same URL-only setup command:
-
-```bash
-python scripts/configure_grok_mcp.py remote
-```
-
-It prints the `/mcps` and `i` login instructions after adding the server. You
-can override the server name, configuration scope, or URL when needed:
-
-```bash
-python scripts/configure_grok_mcp.py --name orange-dev --scope project remote --url https://example.com/mcp
-```
-
-## Replacing the previous token-based configuration
-
-If `orange` was already configured with an `Authorization` header, remove that
-entry before adding the OAuth version:
+After remote works, promote it to the main name if you want:
 
 ```bash
 grok mcp remove orange
-grok mcp add --scope user --transport http orange https://orange-api-x38s.onrender.com/mcp
+grok mcp add --scope user --transport http orange \
+  https://orange-api-x38s.onrender.com/mcp
 ```
 
-Then launch Grok and complete `/mcps` → select Orange → `i` as described above.
+Repository helpers:
+
+```bash
+python scripts/configure_mcp.py grok remote --name orange-remote
+python scripts/configure_mcp.py grok remote
+# historical alias:
+python scripts/configure_grok_mcp.py remote
+```
 
 ## Local stdio diagnostic mode
 
 Local mode remains useful when developing or debugging the MCP process itself:
 
 ```bash
-python scripts/configure_grok_mcp.py local --email you@example.com
+python scripts/configure_mcp.py grok local --email you@example.com
 ```
 
 This starts `core.mcp_server.server` from the current checkout and uses the
@@ -67,7 +67,8 @@ After browser authentication:
 
 ```bash
 grok mcp list
-grok mcp doctor orange
+grok mcp doctor orange-remote
+# or: grok mcp doctor orange
 ```
 
 Useful prompts inside Grok:
@@ -89,8 +90,8 @@ the same company identity in the MCP session and website.
 
 ## Troubleshooting
 
-- If Grok shows that Orange needs authentication, open `/mcps`, select Orange,
-  and press `i` to restart the browser login.
+- If Grok shows that Orange needs authentication, open `/mcps`, select the
+  server, and press `i` to restart the browser login.
 - If the browser login opens but does not complete, confirm you returned through
   the Orange callback page and approved the requested MCP access.
 - Run `grok mcp doctor orange --json` after authentication to separate
@@ -102,4 +103,4 @@ the same company identity in the MCP session and website.
   the deployed URL rather than local stdio and that both surfaces use the same
   user or company identity.
 - If the deployed graph says `demo preview`, verify `ORANGE_BACKEND_URL` on
-  Vercel and the Railway health endpoint.
+  Vercel and the Render health endpoint.

@@ -563,7 +563,7 @@ export default async function Home() {
             href="/mcp"
             className="mt-8 inline-flex h-11 items-center justify-center rounded-md bg-[#f97316] px-5 text-sm font-bold text-white shadow-[0_14px_36px_rgba(249,115,22,0.24)] transition hover:scale-[1.02]"
           >
-            Connect MCP
+            Connect Orange
           </a>
         </div>
       </section>

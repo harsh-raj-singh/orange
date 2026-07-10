@@ -214,35 +214,44 @@ PYTHONPATH=. python -m core.mcp_server.server
 ```
 
 This runs Orange in stdio mode for MCP-compatible clients.
-See [`docs/MCP.md`](docs/MCP.md) for Claude Code and Codex setup snippets.
+See [`docs/MCP.md`](docs/MCP.md) for provider-neutral setup (Grok, Claude,
+ChatGPT, and generic MCP clients). One remote URL is used for every client.
 
 ## MCP Tools
 
 The MCP server currently exposes:
 
-- `orange_status`
-- `recall_memory`
-- `checkpoint_context`
-- `complete_conversation`
-- `store_session`
-- `inspect_graph`
-- `get_node`
-- `get_session_graph`
-- `list_sessions`
-- `get_job_status`
-- `memory_peek`
+- `orange_status` (read-only)
+- `recall_memory` (read-only)
+- `checkpoint_context` (non-destructive write)
+- `complete_conversation` (non-destructive write)
+- `store_session` (non-destructive write)
+- `inspect_graph` (read-only)
+- `get_node` (read-only)
+- `get_session_graph` (read-only)
+- `list_sessions` (read-only)
+- `get_job_status` (read-only)
+- `memory_peek` (read-only)
 
-For coding agents, the happy path is `recall_memory` before answering, `checkpoint_context` when important mid-session context should be preserved, and `complete_conversation` once when the session is done.
+For coding agents, the happy path is `recall_memory` before answering, `checkpoint_context` when important mid-session context should be preserved, and `complete_conversation` once when the session is done. Nodes written through any MCP client bump the scoped graph version so the UI refreshes automatically.
 
-Desktop setup page:
+Desktop setup page (**Connect Orange**):
 
 ```text
 https://site-sage-eta-18.vercel.app/mcp
 ```
 
-This page shows one URL-only Grok command. Grok opens the Orange/Supabase browser
-login and consent flow, then stores and refreshes its own credentials. Users do
-not copy API keys, bearer tokens, or headers.
+One Streamable HTTP URL for Grok CLI, Claude Code / Claude.ai, ChatGPT, and
+generic MCP clients. Browser OAuth (discovery, PKCE, dynamic client
+registration) stores and refreshes credentials in the client. Users do not copy
+API keys, bearer tokens, or headers.
+
+```bash
+python scripts/configure_mcp.py grok remote
+python scripts/configure_mcp.py claude
+python scripts/configure_mcp.py chatgpt
+python scripts/configure_mcp.py generic
+```
 
 ## Deployed Demo
 
@@ -264,7 +273,8 @@ The Vercel site calls Render through `ORANGE_BACKEND_URL` and forwards the
 signed-in user's Supabase access token. Signed-out visitors may see preview data;
 real user memory is never selected by an unverified browser email.
 
-See `DEPLOY.md` for Supabase/Render/Vercel setup and the Grok OAuth smoke test.
+See `DEPLOY.md` for Supabase/Render/Vercel setup and the provider-neutral MCP
+OAuth smoke test (Grok → Claude → ChatGPT).
 
 ## Supabase Schema
 

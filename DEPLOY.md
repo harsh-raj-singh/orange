@@ -119,7 +119,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-browser-safe-publishable-key
 ```
 
 `ORANGE_BACKEND_URL` is used by the Next.js API proxy.  
-`NEXT_PUBLIC_ORANGE_BACKEND_URL` is used by the public MCP setup card on `/mcp`.
+`NEXT_PUBLIC_ORANGE_BACKEND_URL` is used by the public MCP setup card on `/mcp`
+(“Connect Orange” with short tabs for Grok, Claude, ChatGPT, and generic MCP).
 
 Then deploy from `site/`:
 
@@ -130,28 +131,61 @@ vercel --prod
 The site proxy forwards the signed-in user's short-lived Supabase access token
 to Render. It does not forward a browser-supplied email as authorization.
 
-## 4. Grok CLI OAuth test
+## 4. MCP OAuth smoke test (provider-neutral)
 
-Add only Orange's MCP URL:
+Orange keeps **one** remote Streamable HTTP endpoint for every client:
+
+```text
+https://orange-api-x38s.onrender.com/mcp
+```
+
+There are no separate backends for Grok, Claude, or ChatGPT. Discovery, dynamic
+client registration, PKCE, browser login, consent, token storage, and refresh
+are the standard MCP OAuth path. Users never paste a bearer token or API key.
+
+### Discovery (no auth)
 
 ```bash
-grok mcp remove orange
-grok mcp add --scope user --transport http orange \
+curl -sS https://orange-api-x38s.onrender.com/.well-known/oauth-protected-resource/mcp
+curl -sS https://orange-api-x38s.onrender.com/.well-known/oauth-authorization-server
+# Unauthenticated MCP POST should be 401 with resource_metadata WWW-Authenticate.
+```
+
+### Grok first (test as `orange-remote` before replacing local stdio)
+
+```bash
+grok mcp add --scope user --transport http orange-remote \
   https://orange-api-x38s.onrender.com/mcp
 ```
 
-Open Grok, run `/mcps`, select Orange, and press `i`. Grok performs discovery,
-dynamic client registration, PKCE, browser login, consent, token storage, and
-refresh. No bearer header or copied Supabase key is part of the user flow.
-
-After signing in:
+Open Grok, run `/mcps`, select `orange-remote`, press `i`, complete browser
+login. Then:
 
 1. Call `orange_status`.
-2. Store a non-trivial conversation.
+2. Store a non-trivial conversation via `complete_conversation`.
 3. Poll `get_job_status` until it succeeds.
-4. Confirm the new node appears in the deployed graph within one refresh cycle.
-5. Restart the Render service (or wait for a cold start) and confirm Grok
-   reconnects without another token paste.
+4. Confirm the new node appears in the deployed graph within one refresh cycle
+   (scoped graph version poll).
+5. Only then replace a working local `orange` stdio entry with the remote URL
+   if desired.
+
+```bash
+python scripts/configure_mcp.py grok remote --name orange-remote
+```
+
+### Claude, then ChatGPT
+
+Use the same URL with each client's MCP connector UI or CLI. Short instructions:
+
+```bash
+python scripts/configure_mcp.py claude
+python scripts/configure_mcp.py chatgpt
+python scripts/configure_mcp.py generic
+```
+
+Verify login + `orange_status` + a write tool in Grok first, then Claude, then
+ChatGPT. Do not introduce provider-specific backend logic or hardcoded client
+secrets.
 
 ## Optional Slack worker
 

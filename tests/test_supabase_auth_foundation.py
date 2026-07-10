@@ -105,3 +105,54 @@ def test_private_rest_route_rejects_invalid_bearer_from_provider(monkeypatch) ->
     assert response.headers["www-authenticate"] == "Bearer"
     assert response.json() == {"detail": "The Supabase access token is invalid or expired."}
     assert provider.seen_tokens == ["invalid-token"]
+
+
+def test_identity_from_access_token_requires_authenticated_role() -> None:
+    valid = AccessToken(
+        token="t",
+        client_id="c",
+        scopes=[],
+        claims={"sub": "user-1", "email": "a@example.com", "role": "authenticated"},
+    )
+    invalid_role = AccessToken(
+        token="t",
+        client_id="c",
+        scopes=[],
+        claims={"sub": "user-1", "email": "a@example.com", "role": "anon"},
+    )
+    missing_sub = AccessToken(
+        token="t",
+        client_id="c",
+        scopes=[],
+        claims={"email": "a@example.com", "role": "authenticated"},
+    )
+
+    identity = auth.identity_from_access_token(valid)
+    assert identity is not None
+    assert identity.subject == "user-1"
+    assert identity.email == "a@example.com"
+    assert auth.identity_from_access_token(invalid_role) is None
+    assert auth.identity_from_access_token(missing_sub) is None
+    assert auth.identity_from_access_token(None) is None
+
+
+def test_verify_bearer_token_uses_supabase_provider(monkeypatch) -> None:
+    access_token = AccessToken(
+        token="good",
+        client_id="mcp",
+        scopes=[],
+        claims={"sub": "user-9", "email": "nine@example.com", "role": "authenticated"},
+    )
+    provider = StubSupabaseProvider(result=access_token)
+    monkeypatch.setattr(auth, "get_supabase_auth_provider", lambda: provider)
+
+    import asyncio
+
+    identity = asyncio.run(auth.verify_bearer_token("good"))
+    assert identity is not None
+    assert identity.subject == "user-9"
+    assert identity.email == "nine@example.com"
+    assert provider.seen_tokens == ["good"]
+
+    provider.result = None
+    assert asyncio.run(auth.verify_bearer_token("bad")) is None

@@ -3,8 +3,9 @@ import Link from "next/link";
 import McpConnectCard from "@/components/mcp-connect-card";
 
 export const metadata = {
-  title: "Connect Orange to Grok CLI",
-  description: "Add Orange to Grok with one URL, then sign in securely in your browser.",
+  title: "Connect Orange",
+  description:
+    "Connect Grok, Claude, ChatGPT, or any MCP client to Orange with one URL and browser sign-in. No tokens to copy.",
 };
 
 export default function McpPage() {
@@ -22,12 +23,16 @@ export default function McpPage() {
 
         <section className="flex flex-1 items-center py-16">
           <div className="w-full">
-            <p className="font-mono text-sm font-semibold uppercase text-[#f9a66b]">Grok CLI · Remote MCP</p>
+            <p className="font-mono text-sm font-semibold uppercase text-[#f9a66b]">
+              Connect Orange · Remote MCP
+            </p>
             <h1 className="mt-4 max-w-3xl text-5xl font-semibold leading-tight sm:text-6xl">
-              One URL. One browser login. Orange is connected.
+              One URL. One browser login. Every MCP client.
             </h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-[#cbd8cf]">
-              Add the hosted MCP server to Grok, open <span className="font-mono text-[#f9a66b]">/mcps</span>, and authenticate in your browser. No bearer tokens or environment variables required.
+              Orange keeps a single Streamable HTTP endpoint for Grok CLI, Claude Code / Claude.ai,
+              ChatGPT, and generic MCP clients. Sign in in the browser—no bearer tokens or environment
+              secrets to manage.
             </p>
             <div className="mt-10">
               <McpConnectCard />

@@ -1,6 +1,6 @@
 # Orange MCP
 
-Orange exposes a Streamable HTTP MCP resource at:
+Orange exposes **one** Streamable HTTP MCP resource for every client:
 
 ```text
 https://orange-api-x38s.onrender.com/mcp
@@ -8,23 +8,102 @@ https://orange-api-x38s.onrender.com/mcp
 
 (Replace with your Render service hostname after deploy.)
 
-Remote access uses Supabase OAuth Server discovery, dynamic client
-registration, PKCE, browser login, and consent. Users do not create or paste an
-Orange token.
+There are no separate servers for Grok, Claude, ChatGPT, or other agents. The
+backend is provider-neutral. Remote access uses Supabase OAuth Server discovery,
+dynamic client registration, PKCE, browser login, and consent. Users do not
+create or paste an Orange token.
+
+Setup UI: [Connect Orange](https://site-sage-eta-18.vercel.app/mcp)
+
+Helper (prints provider-specific steps; only Grok mutates local config):
+
+```bash
+python scripts/configure_mcp.py url
+python scripts/configure_mcp.py grok remote
+python scripts/configure_mcp.py claude
+python scripts/configure_mcp.py chatgpt
+python scripts/configure_mcp.py generic
+```
 
 ## Grok CLI
 
 ```bash
-grok mcp remove orange
+# Prefer testing remote as a separate name first if local stdio still works:
+grok mcp add --scope user --transport http orange-remote \
+  https://orange-api-x38s.onrender.com/mcp
+
+# Production entry (after remote login works):
 grok mcp add --scope user --transport http orange \
   https://orange-api-x38s.onrender.com/mcp
 ```
 
-Then open Grok, run `/mcps`, select Orange, and press `i`. Complete the browser
-email login and approve access. Grok stores and refreshes the resulting
-credentials.
+Then open Grok, run `/mcps`, select the server, and press `i`. Complete the
+browser email login and approve access. Grok stores and refreshes credentials.
 
-See [GROK.md](GROK.md) for troubleshooting and local stdio mode.
+```bash
+python scripts/configure_mcp.py grok remote
+# historical alias still works:
+python scripts/configure_grok_mcp.py remote
+```
+
+See [GROK.md](GROK.md) for troubleshooting and local stdio diagnostics.
+
+## Claude Code / Claude.ai
+
+```bash
+claude mcp add --transport http orange https://orange-api-x38s.onrender.com/mcp
+```
+
+Or in `.mcp.json` / Claude desktop config (no `Authorization` header):
+
+```json
+{
+  "mcpServers": {
+    "orange": {
+      "type": "http",
+      "url": "https://orange-api-x38s.onrender.com/mcp"
+    }
+  }
+}
+```
+
+Claude.ai custom connectors use the same URL. Complete browser OAuth when
+prompted; do not paste a bearer token.
+
+```bash
+python scripts/configure_mcp.py claude
+```
+
+## ChatGPT
+
+Add the Orange MCP URL to a custom GPT / MCP connector that supports Streamable
+HTTP OAuth:
+
+```text
+https://orange-api-x38s.onrender.com/mcp
+```
+
+Choose browser OAuth when available. Prefer a full MCP client if your ChatGPT
+surface cannot complete OAuth-protected MCP discovery yet.
+
+```bash
+python scripts/configure_mcp.py chatgpt
+```
+
+## Generic MCP clients
+
+Any Streamable HTTP client that supports OAuth protected resources:
+
+1. Point the client at `https://orange-api-x38s.onrender.com/mcp`.
+2. Allow discovery of `/.well-known/oauth-protected-resource/mcp`.
+3. Complete dynamic client registration and PKCE browser login.
+4. Use the memory protocol tools below.
+
+Do not put a static bearer token in config. Orange does not ship client secrets.
+
+```bash
+python scripts/configure_mcp.py generic
+```
 
 ## Memory protocol
 
@@ -37,7 +116,27 @@ See [GROK.md](GROK.md) for troubleshooting and local stdio mode.
 transcript is persisted first and extraction runs through a leased Postgres
 job. A process restart cannot lose an accepted job.
 
-## Tools
+Nodes written through any MCP client bump the scoped graph version. The Orange
+UI polls that version and refreshes automatically so new nodes appear without a
+manual reload.
+
+## Tools and annotations
+
+| Tool | Kind | Annotation hints |
+|------|------|------------------|
+| `orange_status` | read | `readOnlyHint`, non-destructive, idempotent |
+| `recall_memory` | read | `readOnlyHint`, non-destructive, idempotent |
+| `inspect_graph` | read | `readOnlyHint`, non-destructive, idempotent |
+| `get_node` | read | `readOnlyHint`, non-destructive, idempotent |
+| `get_session_graph` | read | `readOnlyHint`, non-destructive, idempotent |
+| `list_sessions` | read | `readOnlyHint`, non-destructive, idempotent |
+| `get_job_status` | read | `readOnlyHint`, non-destructive, idempotent |
+| `memory_peek` | read | `readOnlyHint`, non-destructive, idempotent |
+| `checkpoint_context` | write | non-destructive write |
+| `complete_conversation` | write | non-destructive write |
+| `store_session` | write | non-destructive write |
+
+Write tools append durable memory; they do not delete unrelated graph data.
 
 - `orange_status`: Supabase Postgres, pgvector, job, OAuth, and tool health.
 - `recall_memory`: scoped pgvector recall with Postgres graph context.
@@ -76,9 +175,12 @@ curl https://orange-api-x38s.onrender.com/.well-known/oauth-protected-resource/m
 curl https://orange-api-x38s.onrender.com/.well-known/oauth-authorization-server
 ```
 
-An unauthenticated MCP request should return `401` with a `WWW-Authenticate`
-header containing `resource_metadata`. OAuth discovery and browser consent
-routes remain accessible without an MCP bearer token.
+Protected-resource metadata points at Supabase Auth. Authorization-server
+metadata advertises `registration_endpoint` and
+`code_challenge_methods_supported` (PKCE). An unauthenticated MCP request
+returns `401` with a `WWW-Authenticate` header containing `resource_metadata`.
+OAuth discovery and browser consent routes remain accessible without an MCP
+bearer token.
 
 ## Local stdio
 
@@ -91,6 +193,11 @@ export ORANGE_USER_EMAIL='you@example.com'
 PYTHONPATH=. python -m core.mcp_server.server
 ```
 
-Stdio writes process inline by default. Railway sets
+```bash
+python scripts/configure_mcp.py grok local --email you@example.com
+```
+
+Stdio writes process inline by default. The hosted Render service sets
 `ORANGE_MEMORY_WRITE_MODE=queued` and runs the durable worker in the API
-lifespan.
+lifespan. Prefer remote MCP when you need agent writes to appear on the
+deployed website graph.

@@ -1,104 +1,96 @@
 #!/usr/bin/env python3
-"""Configure Orange as a Grok CLI MCP server without copying secrets into the repo."""
+"""Thin compatibility wrapper around configure_mcp.py for Grok CLI.
+
+Prefer:
+
+    python scripts/configure_mcp.py grok remote
+    python scripts/configure_mcp.py grok local --email you@example.com
+
+This script keeps the historical entry point working:
+
+    python scripts/configure_grok_mcp.py remote
+    python scripts/configure_grok_mcp.py --name orange-dev remote --url https://example.com/mcp
+"""
 
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
-import shutil
-import subprocess
 import sys
+from pathlib import Path
+
+# Allow running as a script without installing the package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from configure_mcp import main as configure_main  # noqa: E402
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_REMOTE_URL = "https://orange-api-x38s.onrender.com/mcp"
+def _rewrite_historical_argv(argv: list[str]) -> list[str]:
+    """Map historical `configure_grok_mcp.py [opts] remote|local ...` to configure_mcp.
 
+    Historical shape mixed global opts with the mode subcommand. New shape is:
 
-def _run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=check, text=True)
+        configure_mcp.py grok [--name/--scope] remote [--url]
+        configure_mcp.py grok [--name/--scope] local [--email]
+    """
 
+    if not argv:
+        return ["grok"]
 
-def _grok_binary() -> str:
-    grok = shutil.which("grok")
-    if not grok:
-        raise SystemExit("Grok CLI was not found on PATH. Install or open Grok, then retry.")
-    return grok
+    # Already using the new provider prefix.
+    if argv[0] in {"grok", "claude", "chatgpt", "generic", "url"}:
+        return argv
 
+    mode: str | None = None
+    mode_index: int | None = None
+    for index, token in enumerate(argv):
+        if token in {"remote", "local"}:
+            mode = token
+            mode_index = index
+            break
 
-def _configure_local(args: argparse.Namespace) -> None:
-    python = REPO_ROOT / "venv311" / "bin" / "python"
-    if not python.exists():
-        raise SystemExit(
-            f"Missing {python}. Create the Python 3.11 environment and install requirements first."
-        )
+    if mode is None or mode_index is None:
+        return ["grok", *argv]
 
-    command = [
-        _grok_binary(),
-        "mcp",
-        "add",
-        "--scope",
-        args.scope,
-        args.name,
-        "-e",
-        f"PYTHONPATH={REPO_ROOT}",
-    ]
-    if args.email:
-        command.extend(["-e", f"ORANGE_USER_EMAIL={args.email.strip().lower()}"])
-    command.extend(["--", str(python), "-m", "core.mcp_server.server"])
-    _run(command)
-    _run([_grok_binary(), "mcp", "doctor", args.name])
+    before = argv[:mode_index]
+    after = argv[mode_index + 1 :]
 
+    # Global opts that belong on the `grok` parser.
+    grok_opts: list[str] = []
+    # Mode-specific opts that belong after `remote` / `local`.
+    mode_opts: list[str] = []
 
-def _configure_remote(args: argparse.Namespace) -> None:
-    command = [
-        _grok_binary(),
-        "mcp",
-        "add",
-        "--scope",
-        args.scope,
-        "--transport",
-        "http",
-        args.name,
-        args.url,
-    ]
-    _run(command)
-    print(
-        f"Configured {args.name} with the Orange MCP URL. Launch Grok, open /mcps, "
-        f"select {args.name}, press i, and finish the browser sign-in. Afterward, run "
-        f"`grok mcp doctor {args.name}` if you want a connection check."
-    )
+    index = 0
+    while index < len(before):
+        token = before[index]
+        if token in {"--name", "--scope"} and index + 1 < len(before):
+            grok_opts.extend([token, before[index + 1]])
+            index += 2
+            continue
+        if token.startswith("--name=") or token.startswith("--scope="):
+            grok_opts.append(token)
+            index += 1
+            continue
+        # Unknown pre-mode options stay with the mode command (e.g. future flags).
+        mode_opts.append(token)
+        index += 1
+
+    mode_opts.extend(after)
+    return ["grok", *grok_opts, mode, *mode_opts]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Configure Orange MCP for Grok CLI.")
-    parser.add_argument("--name", default="orange", help="MCP server name (default: orange).")
-    parser.add_argument(
-        "--scope",
-        choices=("user", "project"),
-        default="user",
-        help="Where Grok stores the MCP configuration (default: user).",
-    )
-    subparsers = parser.add_subparsers(dest="mode", required=True)
-
-    local = subparsers.add_parser("local", help="Run Orange from this checkout over stdio.")
-    local.add_argument(
-        "--email",
-        help="Optional default identity for local private-memory writes.",
-    )
-    local.set_defaults(handler=_configure_local)
-
-    remote = subparsers.add_parser(
-        "remote",
-        help="Use the deployed Orange MCP with browser-based OAuth sign-in.",
-    )
-    remote.add_argument("--url", default=DEFAULT_REMOTE_URL)
-    remote.set_defaults(handler=_configure_remote)
-
-    args = parser.parse_args()
-    try:
-        args.handler(args)
-    except subprocess.CalledProcessError as exc:
-        raise SystemExit(exc.returncode) from exc
+    raw = sys.argv[1:]
+    if raw in (["-h"], ["--help"]):
+        print(__doc__ or "")
+        print("Examples:")
+        print("  python scripts/configure_grok_mcp.py remote")
+        print("  python scripts/configure_grok_mcp.py local --email you@example.com")
+        print("  python scripts/configure_grok_mcp.py --name orange-remote remote")
+        print()
+        print("Preferred entry point:")
+        print("  python scripts/configure_mcp.py grok remote")
+        return
+    argv = _rewrite_historical_argv(raw)
+    configure_main(argv)
 
 
 if __name__ == "__main__":
