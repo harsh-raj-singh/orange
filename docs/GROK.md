@@ -39,14 +39,21 @@ grok mcp add --scope user --transport http orange \
   https://orange-api-x38s.onrender.com/mcp
 ```
 
-Repository helpers:
+Repository helpers (`--name` must come **before** `remote`):
 
 ```bash
-python scripts/configure_mcp.py grok remote --name orange-remote
 python scripts/configure_mcp.py grok remote
-# historical alias:
+# default remote name is orange-remote (safe alongside local stdio orange)
+
+python scripts/configure_mcp.py grok --name orange-remote remote
+# explicit equivalent
+
+# historical alias (same defaults):
 python scripts/configure_grok_mcp.py remote
 ```
+
+The helper will not overwrite an existing Grok MCP name unless you pass
+`--force`.
 
 ## Local stdio diagnostic mode
 

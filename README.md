@@ -248,8 +248,10 @@ API keys, bearer tokens, or headers.
 
 ```bash
 python scripts/configure_mcp.py grok remote
+# defaults to orange-remote; --name before remote if overriding:
+# python scripts/configure_mcp.py grok --name orange-remote remote
 python scripts/configure_mcp.py claude
-python scripts/configure_mcp.py chatgpt
+python scripts/configure_mcp.py chatgpt   # ChatGPT Developer mode App, not Custom GPT Actions
 python scripts/configure_mcp.py generic
 ```
 

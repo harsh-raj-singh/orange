@@ -170,8 +170,14 @@ login. Then:
    if desired.
 
 ```bash
-python scripts/configure_mcp.py grok remote --name orange-remote
+# --name must come before the `remote` subcommand
+python scripts/configure_mcp.py grok --name orange-remote remote
+# equivalent default (remote name defaults to orange-remote):
+python scripts/configure_mcp.py grok remote
 ```
+
+The helper refuses to overwrite an existing Grok server name unless you pass
+`--force`.
 
 ### Claude, then ChatGPT
 
@@ -183,9 +189,16 @@ python scripts/configure_mcp.py chatgpt
 python scripts/configure_mcp.py generic
 ```
 
+**ChatGPT** uses Developer mode + a developer-mode App (Settings → Plugins /
+chatgpt.com/plugins), not Custom GPT Actions. See
+[OpenAI developer mode](https://developers.openai.com/api/docs/guides/developer-mode).
+
 Verify login + `orange_status` + a write tool in Grok first, then Claude, then
 ChatGPT. Do not introduce provider-specific backend logic or hardcoded client
 secrets.
+
+Manual smoke-test checklist and recorded results:
+[`docs/MCP_SMOKE_TEST.md`](docs/MCP_SMOKE_TEST.md).
 
 ## Optional Slack worker
 

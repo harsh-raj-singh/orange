@@ -10,23 +10,34 @@ Users never copy tokens or API keys.
 
 Provider-specific subcommands are thin setup helpers only. The backend is
 provider-neutral.
+
+Remote Grok onboarding defaults to the server name ``orange-remote`` so a
+working local stdio ``orange`` entry is not overwritten during rollout.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REMOTE_URL = "https://orange-api-x38s.onrender.com/mcp"
+DEFAULT_REMOTE_NAME = "orange-remote"
+DEFAULT_LOCAL_NAME = "orange"
 
 
 def _run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, check=check, text=True)
+
+
+def _run_capture(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, check=False, text=True, capture_output=True)
 
 
 def _print_header(title: str) -> None:
@@ -48,6 +59,56 @@ def _grok_binary() -> str:
     return grok
 
 
+def _list_grok_servers() -> list[dict[str, Any]]:
+    """Return configured Grok MCP servers, or [] if list is unavailable."""
+
+    result = _run_capture([_grok_binary(), "mcp", "list", "--json"])
+    if result.returncode != 0 or not (result.stdout or "").strip():
+        return []
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    return []
+
+
+def _find_grok_server(name: str) -> dict[str, Any] | None:
+    for item in _list_grok_servers():
+        if str(item.get("name") or "").strip() == name:
+            return item
+    return None
+
+
+def _describe_server(entry: dict[str, Any]) -> str:
+    if entry.get("url"):
+        return f"http {entry.get('url')}"
+    command = entry.get("command") or ""
+    args = entry.get("args") or []
+    if isinstance(args, list):
+        joined = " ".join(str(part) for part in args)
+        return f"stdio {command} {joined}".strip()
+    return "existing entry"
+
+
+def _ensure_name_available(name: str, *, force: bool) -> None:
+    existing = _find_grok_server(name)
+    if existing is None:
+        return
+    detail = _describe_server(existing)
+    if force:
+        print(
+            f"Warning: overwriting existing Grok MCP server '{name}' ({detail}) because --force was set."
+        )
+        return
+    raise SystemExit(
+        f"Grok MCP server '{name}' already exists ({detail}).\n"
+        f"For remote rollout use: python scripts/configure_mcp.py grok --name {DEFAULT_REMOTE_NAME} remote\n"
+        f"Or pass --force to overwrite '{name}'."
+    )
+
+
 def _configure_grok_local(args: argparse.Namespace) -> None:
     python = REPO_ROOT / "venv311" / "bin" / "python"
     if not python.exists():
@@ -55,13 +116,16 @@ def _configure_grok_local(args: argparse.Namespace) -> None:
             f"Missing {python}. Create the Python 3.11 environment and install requirements first."
         )
 
+    name = (args.name or DEFAULT_LOCAL_NAME).strip() or DEFAULT_LOCAL_NAME
+    _ensure_name_available(name, force=bool(args.force))
+
     command = [
         _grok_binary(),
         "mcp",
         "add",
         "--scope",
         args.scope,
-        args.name,
+        name,
         "-e",
         f"PYTHONPATH={REPO_ROOT}",
     ]
@@ -69,10 +133,13 @@ def _configure_grok_local(args: argparse.Namespace) -> None:
         command.extend(["-e", f"ORANGE_USER_EMAIL={args.email.strip().lower()}"])
     command.extend(["--", str(python), "-m", "core.mcp_server.server"])
     _run(command)
-    _run([_grok_binary(), "mcp", "doctor", args.name])
+    _run([_grok_binary(), "mcp", "doctor", name])
 
 
 def _configure_grok_remote(args: argparse.Namespace) -> None:
+    name = (args.name or DEFAULT_REMOTE_NAME).strip() or DEFAULT_REMOTE_NAME
+    _ensure_name_available(name, force=bool(args.force))
+
     command = [
         _grok_binary(),
         "mcp",
@@ -81,14 +148,15 @@ def _configure_grok_remote(args: argparse.Namespace) -> None:
         args.scope,
         "--transport",
         "http",
-        args.name,
+        name,
         args.url,
     ]
     _run(command)
     print(
-        f"Configured {args.name} with the Orange MCP URL.\n"
-        f"Launch Grok, open /mcps, select {args.name}, press i, and finish browser sign-in.\n"
-        f"Optional check: grok mcp doctor {args.name}"
+        f"Configured {name} with the Orange MCP URL.\n"
+        f"Launch Grok, open /mcps, select {name}, press i, and finish browser sign-in.\n"
+        f"Optional check: grok mcp doctor {name}\n"
+        f"After remote works, promote to '{DEFAULT_LOCAL_NAME}' only if you intend to replace local stdio."
     )
 
 
@@ -120,19 +188,33 @@ def _print_claude_instructions(args: argparse.Namespace) -> None:
 
 def _print_chatgpt_instructions(args: argparse.Namespace) -> None:
     url = args.url
-    _print_header("Connect Orange · ChatGPT")
+    _print_header("Connect Orange · ChatGPT (Developer mode)")
     _print_remote_url(url)
-    print("ChatGPT (custom GPT / MCP connector, when available in your workspace):")
-    print("  1. Create or edit a custom GPT / connector.")
-    print(f"  2. Add the Orange MCP URL: {url}")
-    print("  3. Choose OAuth / browser sign-in when the client offers it.")
-    print("  4. Approve Orange access in the browser; do not paste tokens or keys.")
+    print("Official flow (not Custom GPT Actions):")
+    print("  Docs: https://developers.openai.com/api/docs/guides/developer-mode")
+    print("  Help: https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt")
     print()
-    print(
-        "If your ChatGPT surface only supports Actions with a fixed secret, prefer "
-        "a full MCP client (Grok, Claude Code, Cursor, etc.) that supports "
-        "OAuth-protected MCP resources."
-    )
+    print("1. Enable Developer mode")
+    print("   ChatGPT web → Settings → Security and login (or Settings → Apps → Advanced Settings)")
+    print("   → turn on Developer mode.")
+    print("   On Business/Enterprise/Edu, a workspace admin may need to allow this first.")
+    print()
+    print("2. Create a developer-mode App for the remote MCP server")
+    print("   Open Settings → Plugins (https://chatgpt.com/plugins) or Apps → Create.")
+    print("   Use + to create a developer-mode app (only available after Developer mode is on).")
+    print("   Supported transports: SSE and streaming HTTP.")
+    print()
+    print("3. Configure Orange")
+    print(f"   MCP server URL: {url}")
+    print("   Authentication: OAuth (not a static secret / Custom GPT Action key).")
+    print("   Click Scan Tools, complete the browser Orange login/consent, then Create.")
+    print()
+    print("4. Use in a chat")
+    print("   Open a conversation → Plus menu → Developer mode → select the Orange app.")
+    print("   Call orange_status / recall_memory / complete_conversation as needed.")
+    print("   Write tools may require confirmation; Orange marks recall tools readOnlyHint.")
+    print()
+    print("Do not configure Orange via Custom GPT Actions. That path is not the MCP client flow.")
 
 
 def _print_generic_instructions(args: argparse.Namespace) -> None:
@@ -179,19 +261,32 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Configure Orange MCP for Grok, Claude, ChatGPT, or any MCP client. "
-            "One remote URL; browser OAuth; no copied secrets."
+            "One remote URL; browser OAuth; no copied secrets. "
+            f"Remote Grok defaults to name '{DEFAULT_REMOTE_NAME}'."
         )
     )
     subparsers = parser.add_subparsers(dest="provider", required=True)
 
     # --- Grok (thin automated helper) ---
     grok = subparsers.add_parser("grok", help="Configure Grok CLI MCP entry.")
-    grok.add_argument("--name", default="orange", help="MCP server name (default: orange).")
+    grok.add_argument(
+        "--name",
+        default=None,
+        help=(
+            f"MCP server name. Defaults: remote={DEFAULT_REMOTE_NAME}, "
+            f"local={DEFAULT_LOCAL_NAME}."
+        ),
+    )
     grok.add_argument(
         "--scope",
         choices=("user", "project"),
         default="user",
         help="Where Grok stores the MCP configuration (default: user).",
+    )
+    grok.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing Grok MCP server with the same name.",
     )
     grok_sub = grok.add_subparsers(dest="mode", required=True)
 
@@ -204,7 +299,10 @@ def main(argv: list[str] | None = None) -> None:
 
     grok_remote = grok_sub.add_parser(
         "remote",
-        help="Use the deployed Orange MCP with browser-based OAuth sign-in.",
+        help=(
+            f"Use the deployed Orange MCP with browser OAuth "
+            f"(default name: {DEFAULT_REMOTE_NAME})."
+        ),
     )
     _add_url_arg(grok_remote)
     grok_remote.set_defaults(handler=_configure_grok_remote)
@@ -219,7 +317,7 @@ def main(argv: list[str] | None = None) -> None:
 
     chatgpt = subparsers.add_parser(
         "chatgpt",
-        help="Print ChatGPT connector setup steps (no local mutation).",
+        help="Print ChatGPT Developer mode setup steps (no local mutation).",
     )
     _add_url_arg(chatgpt)
     chatgpt.set_defaults(handler=_print_chatgpt_instructions)

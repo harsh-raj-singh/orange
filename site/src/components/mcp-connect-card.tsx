@@ -29,11 +29,11 @@ const CLIENT_SETUP: Record<
 > = {
   grok: {
     summary:
-      "Add one URL to Grok CLI. Grok opens browser login, stores the session, and refreshes tokens—no secrets to paste.",
+      "Add the remote URL as orange-remote first so a working local stdio orange entry is not overwritten. Grok opens browser login, stores the session, and refreshes tokens—no secrets to paste.",
     commands: [
       {
-        label: "Add Orange (user scope)",
-        value: `grok mcp add --scope user --transport http orange ${ORANGE_MCP_URL}`,
+        label: "Add remote (safe default name)",
+        value: `grok mcp add --scope user --transport http orange-remote ${ORANGE_MCP_URL}`,
       },
       {
         label: "Optional helper",
@@ -42,19 +42,19 @@ const CLIENT_SETUP: Record<
     ],
     steps: [
       {
-        title: "Add the URL",
-        body: "Run the command once. There is no token, API key, or header to copy.",
+        title: "Add orange-remote",
+        body: "Run the command once. The default name is orange-remote so local stdio orange is left alone.",
       },
       {
         title: "Open /mcps",
-        body: "Launch Grok, enter /mcps, select Orange, then press i to start authentication.",
+        body: "Launch Grok, enter /mcps, select orange-remote, then press i to start authentication.",
       },
       {
         title: "Browser sign-in",
-        body: "Finish the Orange email login and consent, then return to Grok.",
+        body: "Finish the Orange email login and consent, then return to Grok and verify tools.",
       },
     ],
-    tip: "Already using a local stdio orange entry? Add the remote first as orange-remote, verify login and tools, then replace the local entry.",
+    tip: "After remote login and tools work, promote with: grok mcp remove orange && grok mcp add --scope user --transport http orange <url>. The helper refuses to overwrite an existing name unless you pass --force.",
   },
   claude: {
     summary:
@@ -94,28 +94,32 @@ const CLIENT_SETUP: Record<
   },
   chatgpt: {
     summary:
-      "Use Orange as a single OAuth-protected MCP resource from ChatGPT custom GPT / connector surfaces that support Streamable HTTP MCP.",
+      "Connect Orange through ChatGPT Developer mode as a developer-mode App (remote MCP). This is not Custom GPT Actions.",
     commands: [
       {
-        label: "MCP URL",
+        label: "MCP URL (paste into the developer-mode app)",
         value: ORANGE_MCP_URL,
+      },
+      {
+        label: "OpenAI docs",
+        value: "https://developers.openai.com/api/docs/guides/developer-mode",
       },
     ],
     steps: [
       {
-        title: "Add the connector",
-        body: "Create or edit a custom GPT / MCP connector and paste only the Orange MCP URL.",
+        title: "Enable Developer mode",
+        body: "In ChatGPT (web), open Settings → Security and login (or Settings → Apps → Advanced Settings) and turn on Developer mode. Workspace admins may need to allow this first.",
       },
       {
-        title: "Choose browser OAuth",
-        body: "When asked how to authenticate, use the OAuth / sign-in flow—not a static secret.",
+        title: "Create a developer-mode App",
+        body: "Open Settings → Plugins (chatgpt.com/plugins) or Apps → Create. Use + to create a developer-mode app for a remote MCP server (SSE or streaming HTTP).",
       },
       {
-        title: "Approve Orange",
-        body: "Complete email login and consent. ChatGPT stores the resulting session.",
+        title: "Point at Orange + OAuth",
+        body: "Paste the Orange MCP URL, choose OAuth (not a static secret), click Scan Tools, complete browser login/consent, then Create. Use the app from the composer’s Developer mode tool.",
       },
     ],
-    tip: "If your ChatGPT surface cannot do MCP OAuth yet, use Grok or Claude Code with the same URL.",
+    tip: "Do not use Custom GPT Actions for Orange. ChatGPT’s MCP path is Developer mode + a developer-mode App. Write tools may ask for confirmation; Orange marks recall tools readOnlyHint.",
   },
   generic: {
     summary:

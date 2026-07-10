@@ -4,12 +4,14 @@
 Prefer:
 
     python scripts/configure_mcp.py grok remote
+    # → adds orange-remote by default (does not overwrite local stdio orange)
+    python scripts/configure_mcp.py grok --name orange remote --force
     python scripts/configure_mcp.py grok local --email you@example.com
 
 This script keeps the historical entry point working:
 
     python scripts/configure_grok_mcp.py remote
-    python scripts/configure_grok_mcp.py --name orange-dev remote --url https://example.com/mcp
+    python scripts/configure_grok_mcp.py --name orange-remote remote --url https://example.com/mcp
 """
 
 from __future__ import annotations
@@ -86,8 +88,9 @@ def main() -> None:
         print("  python scripts/configure_grok_mcp.py local --email you@example.com")
         print("  python scripts/configure_grok_mcp.py --name orange-remote remote")
         print()
-        print("Preferred entry point:")
+        print("Preferred entry point (note: --name before remote):")
         print("  python scripts/configure_mcp.py grok remote")
+        print("  python scripts/configure_mcp.py grok --name orange-remote remote")
         return
     argv = _rewrite_historical_argv(raw)
     configure_main(argv)

@@ -20,6 +20,8 @@ Helper (prints provider-specific steps; only Grok mutates local config):
 ```bash
 python scripts/configure_mcp.py url
 python scripts/configure_mcp.py grok remote
+# remote defaults to name orange-remote; --name must precede remote:
+# python scripts/configure_mcp.py grok --name orange-remote remote
 python scripts/configure_mcp.py claude
 python scripts/configure_mcp.py chatgpt
 python scripts/configure_mcp.py generic
@@ -28,11 +30,12 @@ python scripts/configure_mcp.py generic
 ## Grok CLI
 
 ```bash
-# Prefer testing remote as a separate name first if local stdio still works:
+# Default remote onboarding name is orange-remote (does not overwrite local stdio orange):
 grok mcp add --scope user --transport http orange-remote \
   https://orange-api-x38s.onrender.com/mcp
 
-# Production entry (after remote login works):
+# Production entry (only after remote login and tools work):
+grok mcp remove orange
 grok mcp add --scope user --transport http orange \
   https://orange-api-x38s.onrender.com/mcp
 ```
@@ -42,6 +45,7 @@ browser email login and approve access. Grok stores and refreshes credentials.
 
 ```bash
 python scripts/configure_mcp.py grok remote
+python scripts/configure_mcp.py grok --name orange-remote remote
 # historical alias still works:
 python scripts/configure_grok_mcp.py remote
 ```
@@ -74,17 +78,28 @@ prompted; do not paste a bearer token.
 python scripts/configure_mcp.py claude
 ```
 
-## ChatGPT
+## ChatGPT (Developer mode — not Custom GPT Actions)
 
-Add the Orange MCP URL to a custom GPT / MCP connector that supports Streamable
-HTTP OAuth:
+Orange connects through ChatGPT **Developer mode** as a **developer-mode App**
+for a remote MCP server (SSE or streaming HTTP). This is not Custom GPT Actions.
+
+Official docs:
+[Developer mode](https://developers.openai.com/api/docs/guides/developer-mode) ·
+[Help center](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
+
+1. Enable **Developer mode** in ChatGPT web: **Settings → Security and login**
+   (or **Settings → Apps → Advanced Settings**). Workspace admins may need to
+   allow this on Business/Enterprise/Edu first.
+2. Open **Settings → Plugins** ([chatgpt.com/plugins](https://chatgpt.com/plugins))
+   or **Apps → Create**. Use **+** to create a developer-mode app (only after
+   Developer mode is on).
+3. Paste the Orange MCP URL, choose **OAuth** (not a static secret), click
+   **Scan Tools**, complete browser login/consent, then **Create**.
+4. In a chat, open the Plus menu → **Developer mode** → select the Orange app.
 
 ```text
 https://orange-api-x38s.onrender.com/mcp
 ```
-
-Choose browser OAuth when available. Prefer a full MCP client if your ChatGPT
-surface cannot complete OAuth-protected MCP discovery yet.
 
 ```bash
 python scripts/configure_mcp.py chatgpt
