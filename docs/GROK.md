@@ -10,7 +10,7 @@ Add the hosted MCP URL once. No bearer token, API key, header, or environment
 variable is required:
 
 ```bash
-grok mcp add --scope user --transport http orange https://orange-api-xxxx.onrender.com/mcp
+grok mcp add --scope user --transport http orange https://orange-api-x38s.onrender.com/mcp
 ```
 
 Then authenticate from Grok:
@@ -43,7 +43,7 @@ entry before adding the OAuth version:
 
 ```bash
 grok mcp remove orange
-grok mcp add --scope user --transport http orange https://orange-api-xxxx.onrender.com/mcp
+grok mcp add --scope user --transport http orange https://orange-api-x38s.onrender.com/mcp
 ```
 
 Then launch Grok and complete `/mcps` → select Orange → `i` as described above.

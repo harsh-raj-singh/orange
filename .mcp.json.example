@@ -2,7 +2,7 @@
   "mcpServers": {
     "orange-remote": {
       "type": "http",
-      "url": "https://orange-api-xxxx.onrender.com/mcp/",
+      "url": "https://orange-api-x38s.onrender.com/mcp/",
       "headers": {
         "Authorization": "Bearer ${ORANGE_MCP_TOKEN}"
       }

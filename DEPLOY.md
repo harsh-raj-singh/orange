@@ -76,7 +76,7 @@ OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.4-nano
 ORANGE_MEMORY_WRITE_MODE=queued
 ALLOWED_ORIGINS=https://your-site.vercel.app,http://localhost:3000,http://localhost:3004
-ORANGE_PUBLIC_BACKEND_URL=https://orange-api-xxxx.onrender.com
+ORANGE_PUBLIC_BACKEND_URL=https://orange-api-x38s.onrender.com
 ```
 
 Notes:
@@ -101,8 +101,8 @@ Notes:
 ### Verify
 
 ```bash
-curl https://orange-api-xxxx.onrender.com/health
-curl https://orange-api-xxxx.onrender.com/health/deep
+curl https://orange-api-x38s.onrender.com/health
+curl https://orange-api-x38s.onrender.com/health/deep
 ```
 
 The deep health response should report Postgres and pgvector as healthy.
@@ -112,8 +112,8 @@ The deep health response should report Postgres and pgvector as healthy.
 Set these values on the `site` project for Production, Preview, and Development:
 
 ```text
-ORANGE_BACKEND_URL=https://orange-api-xxxx.onrender.com
-NEXT_PUBLIC_ORANGE_BACKEND_URL=https://orange-api-xxxx.onrender.com
+ORANGE_BACKEND_URL=https://orange-api-x38s.onrender.com
+NEXT_PUBLIC_ORANGE_BACKEND_URL=https://orange-api-x38s.onrender.com
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-browser-safe-publishable-key
 ```
@@ -137,7 +137,7 @@ Add only Orange's MCP URL:
 ```bash
 grok mcp remove orange
 grok mcp add --scope user --transport http orange \
-  https://orange-api-xxxx.onrender.com/mcp
+  https://orange-api-x38s.onrender.com/mcp
 ```
 
 Open Grok, run `/mcps`, select Orange, and press `i`. Grok performs discovery,
