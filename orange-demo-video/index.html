@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #080810;
+        color: #ffffff;
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #080810;
+      }
+
+      .scene {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        background: #080810;
+      }
+
+      .scene::before {
+        position: absolute;
+        inset: -20%;
+        content: "";
+        background: radial-gradient(circle at 50% 50%, rgba(249, 115, 22, 0.14), transparent 34%);
+        opacity: 0.56;
+      }
+
+      .hero-content,
+      .pulse-content,
+      .how-content,
+      .graph-content {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        width: 100%;
+        height: 100%;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 110px 150px;
+      }
+
+      .hero-title,
+      .hero-subtitle {
+        font-size: 86px;
+        font-weight: 300;
+        letter-spacing: -0.045em;
+        line-height: 0.96;
+      }
+
+      .hero-subtitle {
+        margin-top: 42px;
+        color: #fb923c;
+      }
+
+      .orange-node {
+        position: relative;
+        display: grid;
+        width: 156px;
+        height: 156px;
+        place-items: center;
+        margin: 44px 0;
+        border: 1px solid rgba(249, 115, 22, 0.5);
+        border-radius: 999px;
+        background:
+          radial-gradient(circle at 50% 38%, rgba(255, 214, 154, 0.32), transparent 32%),
+          radial-gradient(circle at 50% 50%, rgba(249, 115, 22, 0.34), rgba(15, 15, 20, 0.98) 72%);
+        box-shadow:
+          0 0 0 14px rgba(249, 115, 22, 0.04),
+          0 0 74px rgba(249, 115, 22, 0.48),
+          0 0 160px rgba(249, 115, 22, 0.22),
+          inset 0 0 42px rgba(255, 255, 255, 0.08);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+      }
+
+      .orange-node span {
+        position: absolute;
+        top: calc(50% + 22px);
+        color: rgba(255, 255, 255, 0.42);
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0;
+      }
+
+      .watch-pill {
+        margin-top: 34px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        padding: 12px 20px;
+        color: #6b7280;
+        font-size: 18px;
+      }
+
+      .scenario-content {
+        position: relative;
+        z-index: 2;
+        display: grid;
+        width: 100%;
+        height: 100%;
+        grid-template-columns: 0.4fr 0.6fr;
+        align-items: center;
+        gap: 84px;
+        padding: 96px 132px;
+      }
+
+      .persona {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .scenario-kicker {
+        margin-bottom: 58px;
+        color: rgba(249, 115, 22, 0.82);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 17px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+      }
+
+      .portrait {
+        position: relative;
+        display: grid;
+        width: 128px;
+        height: 128px;
+        place-items: center;
+        overflow: hidden;
+        border: 2px solid rgba(255, 255, 255, 0.82);
+        border-radius: 999px;
+        background:
+          radial-gradient(circle at 45% 24%, rgba(255, 255, 255, 0.32), transparent 18%),
+          radial-gradient(circle at 50% 42%, var(--portrait-glow), transparent 38%),
+          linear-gradient(145deg, #111119, #2a2a34);
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 38px;
+        font-weight: 300;
+      }
+
+      .portrait::after {
+        position: absolute;
+        inset: 50% 18% 0;
+        border-radius: 44% 44% 0 0;
+        content: "";
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .persona-name {
+        margin-top: 28px;
+        font-size: 29px;
+        font-weight: 500;
+      }
+
+      .persona-role {
+        margin-top: 8px;
+        color: #6b7280;
+        font-size: 18px;
+      }
+
+      .context-line {
+        max-width: 370px;
+        margin-top: 48px;
+        color: #6b7280;
+        font-size: 21px;
+        font-style: italic;
+        line-height: 1.5;
+      }
+
+      .frame {
+        position: relative;
+        height: 680px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 28px;
+        background: rgba(15, 15, 20, 0.88);
+        box-shadow: 0 46px 140px rgba(0, 0, 0, 0.6);
+      }
+
+      .frame::after {
+        position: absolute;
+        inset: 0;
+        content: "";
+        background: linear-gradient(to top, rgba(8, 8, 16, 0.96), rgba(8, 8, 16, 0.58) 48%, rgba(8, 8, 16, 0.12));
+      }
+
+      .mock-ui {
+        position: absolute;
+        inset: 0;
+        padding: 42px;
+        filter: blur(1.4px);
+        opacity: 0.8;
+      }
+
+      .mock-topbar {
+        display: flex;
+        gap: 10px;
+      }
+
+      .dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.14);
+      }
+
+      .mock-lines {
+        display: grid;
+        margin-top: 38px;
+        gap: 18px;
+      }
+
+      .mock-line {
+        height: 18px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .mock-line.short {
+        width: 46%;
+      }
+
+      .mock-line.mid {
+        width: 68%;
+      }
+
+      .mock-line.long {
+        width: 86%;
+      }
+
+      .mock-board {
+        display: grid;
+        height: 510px;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 22px;
+        margin-top: 36px;
+      }
+
+      .mock-column {
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.035);
+        padding: 20px;
+      }
+
+      .mock-card {
+        height: 72px;
+        margin-top: 18px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .mock-terminal {
+        height: 530px;
+        margin-top: 34px;
+        border-radius: 18px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 28px;
+      }
+
+      .terminal-row {
+        height: 17px;
+        margin-bottom: 18px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .terminal-row.diff {
+        background: rgba(249, 115, 22, 0.32);
+      }
+
+      .mock-calendar {
+        display: grid;
+        height: 530px;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 14px;
+        margin-top: 34px;
+      }
+
+      .calendar-cell {
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .calendar-cell.hot {
+        border-color: rgba(249, 115, 22, 0.55);
+        background: rgba(249, 115, 22, 0.16);
+        box-shadow: 0 0 42px rgba(249, 115, 22, 0.16);
+      }
+
+      .frame-copy {
+        position: absolute;
+        inset: auto 56px 52px;
+        z-index: 4;
+      }
+
+      .app-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.34);
+        padding: 10px 14px;
+        color: #6b7280;
+        font-size: 16px;
+      }
+
+      .app-icon {
+        display: grid;
+        min-width: 31px;
+        height: 31px;
+        place-items: center;
+        border-radius: 999px;
+        background: rgba(249, 115, 22, 0.14);
+        color: #fb923c;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+
+      .query {
+        display: inline-block;
+        max-width: 960px;
+        overflow: hidden;
+        color: #ffffff;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 31px;
+        line-height: 1.45;
+        will-change: clip-path;
+      }
+
+      .caret {
+        display: inline-block;
+        width: 10px;
+        height: 33px;
+        margin-left: 8px;
+        background: #f97316;
+        transform: translateY(7px);
+      }
+
+      .thinking {
+        display: flex;
+        width: 34px;
+        height: 34px;
+        align-items: center;
+        justify-content: center;
+        margin-top: 28px;
+        border-radius: 999px;
+        background: rgba(249, 115, 22, 0.11);
+      }
+
+      .thinking span {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: #f97316;
+        box-shadow: 0 0 30px rgba(249, 115, 22, 0.78);
+      }
+
+      .response {
+        display: grid;
+        max-width: 1010px;
+        gap: 10px;
+        margin-top: 24px;
+      }
+
+      .response-line {
+        color: #e5e7eb;
+        font-size: 25px;
+        line-height: 1.45;
+      }
+
+      .sources {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .source {
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        padding: 8px 12px;
+        color: #6b7280;
+        font-size: 15px;
+      }
+
+      .notification {
+        max-width: 760px;
+        margin-left: auto;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 26px;
+        background: rgba(15, 15, 20, 0.94);
+        padding: 32px;
+        box-shadow: 0 28px 100px rgba(0, 0, 0, 0.56);
+      }
+
+      .pulse-node {
+        width: 250px;
+        height: 250px;
+        margin: 0;
+        font-size: 26px;
+      }
+
+      .pulse-ring {
+        position: absolute;
+        width: 290px;
+        height: 290px;
+        border: 1px solid rgba(249, 115, 22, 0.5);
+        border-radius: 999px;
+      }
+
+      .how-content {
+        align-items: stretch;
+        padding: 160px;
+      }
+
+      .how-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 92px;
+        margin: auto 0;
+      }
+
+      .step-number {
+        color: #f97316;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 22px;
+      }
+
+      .step-title {
+        margin-top: 34px;
+        color: #ffffff;
+        font-size: 42px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+      }
+
+      .step-body {
+        margin-top: 30px;
+        color: #9ca3af;
+        font-size: 29px;
+        line-height: 1.45;
+      }
+
+      .graph-content {
+        align-items: stretch;
+        padding: 86px 138px;
+      }
+
+      .graph-heading {
+        max-width: 760px;
+        font-size: 54px;
+        font-weight: 300;
+        line-height: 1.05;
+      }
+
+      .graph-stage {
+        position: relative;
+        flex: 1;
+        margin-top: 70px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 30px;
+        background: rgba(15, 15, 20, 0.72);
+        box-shadow: 0 40px 140px rgba(0, 0, 0, 0.5);
+      }
+
+      .graph-node {
+        position: absolute;
+        display: grid;
+        min-width: 172px;
+        place-items: center;
+        border: 1px solid rgba(249, 115, 22, 0.28);
+        border-radius: 999px;
+        background: rgba(249, 115, 22, 0.1);
+        padding: 18px 22px;
+        color: #ffffff;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 17px;
+        box-shadow: 0 0 46px rgba(249, 115, 22, 0.12);
+      }
+
+      .graph-line {
+        position: absolute;
+        height: 1px;
+        transform-origin: left center;
+        background: rgba(249, 115, 22, 0.28);
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="52"
+      data-width="1920"
+      data-height="1080"
+    >
+      <section id="hero" class="clip scene" data-start="0" data-duration="5.5" data-track-index="1">
+        <div class="hero-content">
+          <h1 class="hero-title">Your team&apos;s memory.</h1>
+          <div class="orange-node">ORANGE<span>memory fabric</span></div>
+          <p class="hero-subtitle">All of it. Always there.</p>
+          <div class="watch-pill">↓ Watch it work</div>
+        </div>
+      </section>
+
+      <section id="s1" class="clip scene" data-start="5.5" data-duration="7.5" data-track-index="1">
+        <div class="scenario-content">
+          <div class="persona">
+            <div class="scenario-kicker">01 / The Forgotten Decision</div>
+            <div class="portrait" style="--portrait-glow: rgba(249,115,22,0.34)">H</div>
+            <div class="persona-name">Harsh</div>
+            <div class="persona-role">Founding Engineer</div>
+            <div class="context-line">“Checking in after 2 weeks away”</div>
+          </div>
+          <div class="frame">
+            <div class="mock-ui">
+              <div class="mock-topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+              <div class="mock-lines">
+                <div class="mock-line long"></div>
+                <div class="mock-line mid"></div>
+                <div class="mock-line short"></div>
+                <div class="mock-line long"></div>
+                <div class="mock-line mid"></div>
+                <div class="mock-line short"></div>
+              </div>
+            </div>
+            <div class="frame-copy">
+              <div class="app-pill"><span class="app-icon">S</span>Slack</div>
+              <div class="query">What did Rohan and I decide about Spain GTM two weeks ago?<span class="caret"></span></div>
+              <div class="thinking"><span></span></div>
+              <div class="response">
+                <p class="response-line">Soft launch Q3. No paid ads yet.</p>
+                <p class="response-line">Focus on inbound from Barcelona devs.</p>
+                <p class="response-line">Rohan confirmed via DM on May 3rd — “let&apos;s not burn budget until we have 3 design partners there.”</p>
+              </div>
+              <div class="sources"><span class="source">Slack · #gtm-intl</span><span class="source">DM · Rohan · May 3</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="p1" class="clip scene pulse-scene" data-start="13" data-duration="2" data-track-index="1">
+        <div class="pulse-content">
+          <div class="pulse-ring"></div>
+          <div class="orange-node pulse-node">ORANGE<span>memory fabric</span></div>
+        </div>
+      </section>
+
+      <section id="s2" class="clip scene" data-start="15" data-duration="7.5" data-track-index="1">
+        <div class="scenario-content">
+          <div class="persona">
+            <div class="scenario-kicker">02 / The New Teammate</div>
+            <div class="portrait" style="--portrait-glow: rgba(99,102,241,0.3)">P</div>
+            <div class="persona-name">Priya</div>
+            <div class="persona-role">Engineer (Day 1)</div>
+            <div class="context-line">“Joining the codebase cold”</div>
+          </div>
+          <div class="frame">
+            <div class="mock-ui">
+              <div class="mock-topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+              <div class="mock-terminal">
+                <div class="terminal-row"></div>
+                <div class="terminal-row diff"></div>
+                <div class="terminal-row"></div>
+                <div class="terminal-row"></div>
+                <div class="terminal-row diff"></div>
+                <div class="terminal-row"></div>
+              </div>
+            </div>
+            <div class="frame-copy">
+              <div class="app-pill"><span class="app-icon">C</span>Claude Code</div>
+              <div class="query">What&apos;s the recurring bug pattern in our auth layer?<span class="caret"></span></div>
+              <div class="thinking"><span></span></div>
+              <div class="response">
+                <p class="response-line">3 sessions flagged the same root cause: middleware ordering in server.py.</p>
+                <p class="response-line">CORS preflight returns 405 when auth middleware runs before route registration.</p>
+              </div>
+              <div class="sources"><span class="source">Session · Apr 28</span><span class="source">Session · May 2</span><span class="source">Session · May 9</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="p2" class="clip scene pulse-scene" data-start="22.5" data-duration="2" data-track-index="1">
+        <div class="pulse-content">
+          <div class="pulse-ring"></div>
+          <div class="orange-node pulse-node">ORANGE<span>memory fabric</span></div>
+        </div>
+      </section>
+
+      <section id="s3" class="clip scene" data-start="24.5" data-duration="7.5" data-track-index="1">
+        <div class="scenario-content">
+          <div class="persona">
+            <div class="scenario-kicker">03 / The Cross-Tool Answer</div>
+            <div class="portrait" style="--portrait-glow: rgba(94,106,210,0.3)">A</div>
+            <div class="persona-name">Aanya</div>
+            <div class="persona-role">Product</div>
+            <div class="context-line">“Preparing the board deck”</div>
+          </div>
+          <div class="frame">
+            <div class="mock-ui">
+              <div class="mock-topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+              <div class="mock-board">
+                <div class="mock-column"><div class="mock-card"></div><div class="mock-card"></div><div class="mock-card"></div></div>
+                <div class="mock-column"><div class="mock-card"></div><div class="mock-card"></div></div>
+                <div class="mock-column"><div class="mock-card"></div><div class="mock-card"></div><div class="mock-card"></div></div>
+              </div>
+            </div>
+            <div class="frame-copy">
+              <div class="app-pill"><span class="app-icon">L</span>Linear</div>
+              <div class="query">What&apos;s actually blocking Neo4j performance? I need this for the board deck.<span class="caret"></span></div>
+              <div class="thinking"><span></span></div>
+              <div class="response">
+                <p class="response-line">Dense graph queries on the memory layer are hitting index misses.</p>
+                <p class="response-line">Ticket OG-47 has a workaround branch. Root cause discussed in Slack on May 11.</p>
+                <p class="response-line">Harsh estimated 2-day fix. Not yet prioritized in current sprint.</p>
+              </div>
+              <div class="sources"><span class="source">Linear · OG-47</span><span class="source">Slack · May 11</span><span class="source">Session · May 9</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="p3" class="clip scene pulse-scene" data-start="32" data-duration="2" data-track-index="1">
+        <div class="pulse-content">
+          <div class="pulse-ring"></div>
+          <div class="orange-node pulse-node">ORANGE<span>memory fabric</span></div>
+        </div>
+      </section>
+
+      <section id="s4" class="clip scene" data-start="34" data-duration="7.5" data-track-index="1">
+        <div class="scenario-content">
+          <div class="persona">
+            <div class="scenario-kicker">04 / The Meeting Brief</div>
+            <div class="portrait" style="--portrait-glow: rgba(249,115,22,0.28)">A</div>
+            <div class="persona-name">Arjun</div>
+            <div class="persona-role">CEO</div>
+            <div class="context-line">“Minutes before a call”</div>
+          </div>
+          <div class="frame">
+            <div class="mock-ui">
+              <div class="mock-topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+              <div class="mock-calendar">
+                <div class="calendar-cell"></div><div class="calendar-cell"></div><div class="calendar-cell hot"></div><div class="calendar-cell"></div><div class="calendar-cell"></div>
+                <div class="calendar-cell"></div><div class="calendar-cell"></div><div class="calendar-cell"></div><div class="calendar-cell"></div><div class="calendar-cell"></div>
+                <div class="calendar-cell"></div><div class="calendar-cell"></div><div class="calendar-cell"></div><div class="calendar-cell"></div><div class="calendar-cell"></div>
+              </div>
+            </div>
+            <div class="frame-copy">
+              <div class="notification">
+                <div class="app-pill"><span class="app-icon">Cal</span>Orange surfaced this</div>
+                <div class="thinking"><span></span></div>
+                <div class="response">
+                  <p class="response-line">Investor call in 8 minutes. Last conversation: April 12.</p>
+                  <p class="response-line">You requested a 60-day Series A extension. He agreed conditionally — wanted graph recall benchmarks first.</p>
+                  <p class="response-line">You haven&apos;t sent those yet.</p>
+                </div>
+                <div class="sources"><span class="source">Gmail · Apr 12</span><span class="source">Notes · Apr 12</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="how" class="clip scene" data-start="41.5" data-duration="5" data-track-index="1">
+        <div class="how-content">
+          <div class="how-grid">
+            <div class="step">
+              <div class="step-number">1</div>
+              <div class="step-title">INGEST</div>
+              <div class="step-body">Every conversation across your tools is captured.</div>
+            </div>
+            <div class="step">
+              <div class="step-number">2</div>
+              <div class="step-title">REMEMBER</div>
+              <div class="step-body">Orange builds a persistent graph of decisions, context, and relationships.</div>
+            </div>
+            <div class="step">
+              <div class="step-number">3</div>
+              <div class="step-title">SURFACE</div>
+              <div class="step-body">Any teammate, any tool, any time — the right memory appears.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="graph" class="clip scene" data-start="46.5" data-duration="5.5" data-track-index="1">
+        <div class="graph-content">
+          <h2 class="graph-heading">The graph is not a database view. It is the team remembering.</h2>
+          <div class="graph-stage">
+            <div class="graph-line" style="left: 25%; top: 43%; width: 340px; transform: rotate(15deg)"></div>
+            <div class="graph-line" style="left: 45%; top: 55%; width: 360px; transform: rotate(-18deg)"></div>
+            <div class="graph-line" style="left: 32%; top: 67%; width: 520px; transform: rotate(-8deg)"></div>
+            <div class="graph-node" style="left: 14%; top: 28%">Slack decision</div>
+            <div class="graph-node" style="left: 38%; top: 42%">Company fact</div>
+            <div class="graph-node" style="left: 68%; top: 30%">Claude session</div>
+            <div class="graph-node" style="left: 54%; top: 66%">Linear ticket</div>
+            <div class="graph-node" style="left: 22%; top: 72%">Investor email</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      const sceneDurations = {
+        hero: 5.5,
+        s1: 7.5,
+        p1: 2,
+        s2: 7.5,
+        p2: 2,
+        s3: 7.5,
+        p3: 2,
+        s4: 7.5,
+        how: 5,
+        graph: 5.5,
+      };
+
+      function sel(id, suffix) {
+        return "#" + id + (suffix || "");
+      }
+
+      function enterScene(id, start) {
+        tl.from(sel(id), { opacity: 0, duration: 0.35, ease: "power2.out" }, start);
+        tl.to(sel(id), { opacity: 0, duration: 0.3, ease: "power2.in" }, start + sceneDurations[id] - 0.3);
+      }
+
+      function pulseNode(selector, start, duration) {
+        tl.fromTo(selector, { scale: 1 }, { scale: 1.08, duration: 1.5, yoyo: true, repeat: Math.ceil(duration / 3), ease: "sine.inOut" }, start);
+      }
+
+      function addScenario(id, start, typeDuration, proactive) {
+        enterScene(id, start);
+        tl.from(sel(id, " .scenario-kicker"), { y: 24, opacity: 0, duration: 0.5, ease: "power3.out" }, start + 0.35);
+        tl.from(sel(id, " .portrait"), { y: 32, opacity: 0, scale: 0.92, duration: 0.65, ease: "power3.out" }, start + 0.5);
+        tl.from(sel(id, " .persona-name") + ", " + sel(id, " .persona-role") + ", " + sel(id, " .context-line"), { y: 18, opacity: 0, duration: 0.5, stagger: 0.12, ease: "power2.out" }, start + 0.9);
+        tl.from(sel(id, " .frame"), { y: 42, opacity: 0, scale: 0.985, duration: 0.78, ease: "power3.out" }, start + 0.45);
+
+        if (proactive) {
+          tl.from(sel(id, " .notification"), { y: 86, opacity: 0, duration: 0.65, ease: "power3.out" }, start + 1.1);
+          tl.from(sel(id, " .thinking"), { scale: 0.7, opacity: 0, duration: 0.28, ease: "power2.out" }, start + 1.65);
+          tl.from(sel(id, " .response-line"), { y: 14, opacity: 0, duration: 0.42, stagger: 0.16, ease: "power2.out" }, start + 2.35);
+          tl.from(sel(id, " .source"), { y: 10, opacity: 0, duration: 0.34, stagger: 0.08, ease: "power2.out" }, start + 3.25);
+          return;
+        }
+
+        tl.fromTo(sel(id, " .query"), { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: typeDuration, ease: "steps(" + Math.round(typeDuration * 24) + ")" }, start + 1.2);
+        tl.from(sel(id, " .caret"), { opacity: 0, duration: 0.1 }, start + 1.2);
+        tl.to(sel(id, " .caret"), { opacity: 0, duration: 0.12, repeat: Math.ceil(typeDuration / 0.5), yoyo: true, ease: "steps(1)" }, start + 1.3);
+        tl.from(sel(id, " .thinking"), { scale: 0.7, opacity: 0, duration: 0.28, ease: "power2.out" }, start + 1.2 + typeDuration + 0.3);
+        tl.from(sel(id, " .thinking span"), { scale: 0.7, opacity: 0.5, duration: 0.45, yoyo: true, repeat: 4, ease: "sine.inOut" }, start + 1.2 + typeDuration + 0.45);
+        tl.from(sel(id, " .response-line"), { y: 14, opacity: 0, duration: 0.42, stagger: 0.16, ease: "power2.out" }, start + 1.2 + typeDuration + 1.1);
+        tl.from(sel(id, " .source"), { y: 10, opacity: 0, duration: 0.34, stagger: 0.08, ease: "power2.out" }, start + 1.2 + typeDuration + 2.1);
+      }
+
+      function addPulse(id, start) {
+        enterScene(id, start);
+        tl.from(sel(id, " .pulse-node"), { opacity: 0, scale: 0.82, duration: 0.4, ease: "power2.out" }, start + 0.08);
+        tl.to(sel(id, " .pulse-node"), { scale: 1.15, duration: 0.3, yoyo: true, repeat: 1, ease: "power2.out" }, start + 0.48);
+        tl.fromTo(sel(id, " .pulse-ring"), { scale: 0.2, opacity: 0.8 }, { scale: 2.8, opacity: 0, duration: 0.9, ease: "power2.out" }, start + 0.5);
+      }
+
+      enterScene("hero", 0);
+      tl.from(".hero-title", { y: 34, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.45);
+      tl.from("#hero .orange-node", { scale: 0.86, opacity: 0, duration: 0.65, ease: "power2.out" }, 1.0);
+      pulseNode("#hero .orange-node", 1.4, 4);
+      tl.from(".hero-subtitle", { y: 34, opacity: 0, duration: 0.7, ease: "power3.out" }, 1.35);
+      tl.from(".watch-pill", { y: 20, opacity: 0, duration: 0.55, ease: "power2.out" }, 2.55);
+      tl.to(".watch-pill", { y: 8, duration: 0.7, yoyo: true, repeat: 3, ease: "sine.inOut" }, 3.2);
+
+      addScenario("s1", 5.5, 2.15, false);
+      addPulse("p1", 13);
+      addScenario("s2", 15, 1.9, false);
+      addPulse("p2", 22.5);
+      addScenario("s3", 24.5, 2.25, false);
+      addPulse("p3", 32);
+      addScenario("s4", 34, 0, true);
+
+      enterScene("how", 41.5);
+      tl.from("#how .step", { y: 36, opacity: 0, duration: 0.65, stagger: 0.18, ease: "power3.out" }, 42.1);
+
+      enterScene("graph", 46.5);
+      tl.from("#graph .graph-heading", { y: 28, opacity: 0, duration: 0.62, ease: "power3.out" }, 47.0);
+      tl.from("#graph .graph-stage", { y: 28, opacity: 0, duration: 0.72, ease: "power3.out" }, 47.35);
+      tl.from("#graph .graph-line", { scaleX: 0, opacity: 0, duration: 0.62, stagger: 0.13, ease: "power2.out" }, 47.85);
+      tl.from("#graph .graph-node", { scale: 0.72, opacity: 0, duration: 0.5, stagger: 0.16, ease: "back.out(1.7)" }, 48.1);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
